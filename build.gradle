@@ -1,0 +1,82 @@
+plugins {
+    id 'fabric-loom' version '1.13.6'
+    id 'maven-publish'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = "${project.archives_base_name}-${project.minecraft_version}"
+}
+
+loom {
+    providers.gradleProperty('minecraft_manifest_url').orNull?.with { manifestUrl ->
+        customMinecraftManifest.set(manifestUrl)
+    }
+}
+
+repositories {
+    def fabricMavenUrl = providers.gradleProperty('fabric_maven_url').orElse('https://maven.fabricmc.net/').get()
+    def allowInsecureFabricMaven = providers.gradleProperty('fabric_maven_allow_insecure').orElse('false').get().toBoolean()
+    maven {
+        url = uri(fabricMavenUrl)
+        allowInsecureProtocol = allowInsecureFabricMaven
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    if (project.minecraft_version == '1.21.11') {
+        modImplementation "net.fabricmc.fabric-api:fabric-api-base:1.0.5+4ebb5c083e"
+        modImplementation "net.fabricmc.fabric-api:fabric-key-binding-api-v1:1.1.7+4fc5413f3e"
+        modImplementation "net.fabricmc.fabric-api:fabric-lifecycle-events-v1:2.6.15+4ebb5c083e"
+        modImplementation "net.fabricmc.fabric-api:fabric-rendering-v1:16.2.6+1fb1cde93e"
+    } else {
+        modImplementation "net.fabricmc.fabric-api:fabric-api-base:0.5.0+cd8c0daa2c"
+        modImplementation "net.fabricmc.fabric-api:fabric-key-binding-api-v1:1.0.65+946bf4c32c"
+        modImplementation "net.fabricmc.fabric-api:fabric-lifecycle-events-v1:2.6.4+db4dfd852c"
+        modImplementation "net.fabricmc.fabric-api:fabric-rendering-v1:12.6.0+486b7ff72c"
+    }
+    implementation "com.google.code.gson:gson:2.11.0"
+    testImplementation "org.junit.jupiter:junit-jupiter:5.11.4"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    withSourcesJar()
+}
+
+sourceSets {
+    main {
+        java {
+            srcDir "src/${compatSourceSet()}/java"
+        }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+}
+
+test {
+    useJUnitPlatform()
+}
+
+processResources {
+    inputs.property 'version', project.version
+    inputs.property 'minecraft_version', project.minecraft_version
+    filesMatching('fabric.mod.json') {
+        expand 'version': project.version, 'minecraft_version': project.minecraft_version
+    }
+}
+
+String compatSourceSet() {
+    def target = project.minecraft_version.toString()
+    return target == '1.21.11' ? 'compat12111' : 'compat1218'
+}

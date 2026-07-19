@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest a practical Companion improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Current workflow
+      description: Explain what you are doing with a MapKluss art in Minecraft.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the expected result, not only the button or screen.
+    validations:
+      required: true
+  - type: textarea
+    id: value
+    attributes:
+      label: Why it matters
+      description: Explain what becomes faster, safer, or clearer.
+    validations:
+      required: true

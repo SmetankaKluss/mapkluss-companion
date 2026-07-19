@@ -1,0 +1,34 @@
+pluginManagement {
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == 'fabric-loom') {
+                useModule("net.fabricmc:fabric-loom:${requested.version}")
+            }
+        }
+    }
+    def fabricMavenUrl = providers.gradleProperty('fabric_maven_url').orElse('https://maven.fabricmc.net/').get()
+    def allowInsecureFabricMaven = providers.gradleProperty('fabric_maven_allow_insecure').orElse('false').get().toBoolean()
+    repositories {
+        maven {
+            url = fabricMavenUrl
+            allowInsecureProtocol = allowInsecureFabricMaven
+        }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    def fabricMavenUrl = providers.gradleProperty('fabric_maven_url').orElse('https://maven.fabricmc.net/').get()
+    def allowInsecureFabricMaven = providers.gradleProperty('fabric_maven_allow_insecure').orElse('false').get().toBoolean()
+    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
+    repositories {
+        maven {
+            url = fabricMavenUrl
+            allowInsecureProtocol = allowInsecureFabricMaven
+        }
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'mapkluss-companion'

@@ -1,0 +1,68 @@
+MapKluss Source-Available License 1.0
+
+Copyright (c) 2026 SmetankaKluss. All rights reserved.
+
+1. Scope
+
+This license applies to the MapKluss Companion source code, documentation,
+assets, and other original material in this repository (the "Software"),
+except for third-party material identified in THIRD_PARTY_NOTICES.md or in
+the material itself.
+
+2. Official binaries
+
+You may download, install, and use unmodified official binary releases of
+the Software for personal, non-commercial Minecraft gameplay. This limited
+permission does not include redistribution, resale, hosting of alternative
+downloads, modification, decompilation beyond rights that cannot lawfully be
+waived, or creation of derivative works.
+
+3. Public source access
+
+The source code is published for transparency, security review, and personal
+evaluation. Except for the limited actions that the repository hosting
+service's mandatory terms allow inside that service, no permission is granted
+to copy, reproduce, clone, mirror, download, modify, adapt, translate,
+redistribute, publish, sublicense, sell, commercialize, incorporate into
+another project or service, or create derivative works from the Software.
+
+4. No implied rights
+
+No patent, trademark, trade dress, branding, commercial-use, or other rights
+are granted. "MapKluss", "MapKluss Companion", associated logos, and other
+project identifiers may not be used to imply endorsement or affiliation.
+
+5. Written permission
+
+Any use outside the permissions above requires prior written permission from
+the copyright holder. A permission granted for one version, person, or purpose
+does not apply to any other version, person, or purpose unless it says so
+explicitly.
+
+6. Contributions
+
+Submitting code or other material does not grant permission to reuse the
+existing Software. Contributions are accepted only under separate terms
+agreed with the copyright holder before inclusion.
+
+7. Third-party material
+
+Third-party components and build tools remain governed by their respective
+licenses and terms. This license does not restrict rights granted directly by
+those third parties.
+
+8. Termination
+
+Any permission granted by this license terminates automatically if you breach
+its terms. Termination does not limit any other rights or remedies available
+to the copyright holder.
+
+9. Disclaimer
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. TO THE MAXIMUM EXTENT
+PERMITTED BY LAW, THE COPYRIGHT HOLDER IS NOT LIABLE FOR ANY CLAIM, DAMAGES,
+OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
+
+This is a source-available license, not an open-source license.

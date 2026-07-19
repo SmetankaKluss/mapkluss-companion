@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "mapkluss-companion",
+  "version": "${version}",
+  "name": "MapKluss Companion",
+  "description": "Client companion for MapKluss cloud arts, litematics, map scans, and build progress.",
+  "authors": ["SmetankaKluss"],
+  "contact": {
+    "homepage": "https://mapkluss.art",
+    "sources": "https://github.com/SmetankaKluss/mapkluss-companion"
+  },
+  "license": "LicenseRef-MapKluss-Source-Available-1.0",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "art.mapkluss.companion.MapKlussCompanionClient"
+    ]
+  },
+  "mixins": [
+    "mapkluss-companion.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.17.0",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}",
+    "java": ">=21"
+  },
+  "suggests": {
+    "litematica": "*",
+    "malilib": "*"
+  },
+  "custom": {
+    "modmenu": {
+      "links": {
+        "Cloud and mod": "https://mapkluss.art/cloud"
+      }
+    }
+  }
+}
