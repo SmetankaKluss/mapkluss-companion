@@ -16,6 +16,7 @@ public final class SuppressionPlanParser {
     public static final int MAX_BUNDLE_EXPANDED_BYTES = 192 * 1024 * 1024;
     public static final int MAP_BYTES = 128 * 128;
     public static final int PHASES = 64;
+    public static final Set<String> SUPPORTED_MINECRAFT_VERSIONS = Set.of("1.21.4", "1.21.8", "1.21.11", "26.2");
     private static final Gson GSON = new Gson();
     private static final Set<String> UNSTABLE_TARGET_STATES = Set.of(
         "minecraft:dirt", "minecraft:grass_block", "minecraft:mycelium", "minecraft:dirt_path", "minecraft:farmland",
@@ -50,7 +51,7 @@ public final class SuppressionPlanParser {
         }
         if (plan.target() == null || plan.target().scale() != 0 || plan.target().width() != 128 || plan.target().height() != 128
             || !"minecraft:overworld".equals(plan.target().dimension())
-            || !("1.21.8".equals(plan.target().minecraftVersion()) || "1.21.11".equals(plan.target().minecraftVersion()))) {
+            || !SUPPORTED_MINECRAFT_VERSIONS.contains(plan.target().minecraftVersion())) {
             throw new IOException("Unsupported Two-layer target");
         }
         if (plan.axes() == null || !"northwest_baseline".equals(plan.axes().anchor())

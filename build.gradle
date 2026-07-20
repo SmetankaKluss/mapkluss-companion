@@ -1,7 +1,57 @@
 plugins {
-    id 'fabric-loom' version '1.13.6'
+    id 'net.fabricmc.fabric-loom' version '1.17-SNAPSHOT' apply false
+    id 'net.fabricmc.fabric-loom-remap' version '1.17-SNAPSHOT' apply false
     id 'maven-publish'
 }
+
+def targets = [
+    '26.2': [
+        java: 25,
+        loader: '0.19.3',
+        fabricApi: '0.155.2+26.2',
+        mappings: null,
+        minecraftSources: ['minecraft262'],
+        compatSources: 'compat262',
+        testSources: ['test262'],
+        unobfuscated: true,
+    ],
+    '1.21.11': [
+        java: 21,
+        loader: '0.17.3',
+        mappings: '1.21.11+build.1',
+        minecraftSources: ['minecraftLegacy', 'minecraft1218plus'],
+        compatSources: 'compat12111',
+        testSources: ['testLegacy', 'test1218plus'],
+        unobfuscated: false,
+    ],
+    '1.21.8': [
+        java: 21,
+        loader: '0.17.3',
+        mappings: '1.21.8+build.1',
+        minecraftSources: ['minecraftLegacy', 'minecraft1218plus'],
+        compatSources: 'compat1218',
+        testSources: ['testLegacy', 'test1218plus'],
+        unobfuscated: false,
+    ],
+    '1.21.4': [
+        java: 21,
+        loader: '0.17.3',
+        fabricApi: '0.119.4+1.21.4',
+        mappings: '1.21.4+build.8',
+        minecraftSources: ['minecraftLegacy', 'minecraft1214'],
+        compatSources: 'compat1214',
+        testSources: ['testLegacy', 'test1214'],
+        unobfuscated: false,
+    ],
+]
+
+def targetMinecraft = providers.gradleProperty('minecraft_version').get()
+def target = targets[targetMinecraft]
+if (target == null) {
+    throw new GradleException("Unsupported minecraft_version '${targetMinecraft}'. Supported targets: ${targets.keySet().join(', ')}")
+}
+
+apply plugin: target.unobfuscated ? 'net.fabricmc.fabric-loom' : 'net.fabricmc.fabric-loom-remap'
 
 version = project.mod_version
 group = project.maven_group
@@ -26,10 +76,14 @@ repositories {
 }
 
 dependencies {
-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
-    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-    if (project.minecraft_version == '1.21.11') {
+    minecraft "com.mojang:minecraft:${targetMinecraft}"
+    if (!target.unobfuscated) {
+        mappings "net.fabricmc:yarn:${target.mappings}:v2"
+    }
+    add(target.unobfuscated ? 'implementation' : 'modImplementation', "net.fabricmc:fabric-loader:${target.loader}")
+    if (target.fabricApi != null) {
+        add(target.unobfuscated ? 'implementation' : 'modImplementation', "net.fabricmc.fabric-api:fabric-api:${target.fabricApi}")
+    } else if (targetMinecraft == '1.21.11') {
         modImplementation "net.fabricmc.fabric-api:fabric-api-base:1.0.5+4ebb5c083e"
         modImplementation "net.fabricmc.fabric-api:fabric-key-binding-api-v1:1.1.7+4fc5413f3e"
         modImplementation "net.fabricmc.fabric-api:fabric-lifecycle-events-v1:2.6.15+4ebb5c083e"
@@ -42,11 +96,12 @@ dependencies {
     }
     implementation "com.google.code.gson:gson:2.11.0"
     testImplementation "org.junit.jupiter:junit-jupiter:5.11.4"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(target.java)
     }
     withSourcesJar()
 }
@@ -54,14 +109,20 @@ java {
 sourceSets {
     main {
         java {
-            srcDir "src/${compatSourceSet()}/java"
+            target.minecraftSources.each { sourceName -> srcDir "src/${sourceName}/java" }
+            srcDir "src/${target.compatSources}/java"
+        }
+    }
+    test {
+        java {
+            target.testSources.each { sourceName -> srcDir "src/${sourceName}/java" }
         }
     }
 }
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
-    options.release = 21
+    options.release = target.java
 }
 
 test {
@@ -71,12 +132,12 @@ test {
 processResources {
     inputs.property 'version', project.version
     inputs.property 'minecraft_version', project.minecraft_version
+    inputs.property 'java_version', target.java
+    inputs.property 'mixin_compatibility', "JAVA_${target.java}"
     filesMatching('fabric.mod.json') {
-        expand 'version': project.version, 'minecraft_version': project.minecraft_version
+        expand 'version': project.version, 'minecraft_version': project.minecraft_version, 'java_version': target.java
     }
-}
-
-String compatSourceSet() {
-    def target = project.minecraft_version.toString()
-    return target == '1.21.11' ? 'compat12111' : 'compat1218'
+    filesMatching('mapkluss-companion.mixins.json') {
+        expand 'mixin_compatibility': "JAVA_${target.java}"
+    }
 }

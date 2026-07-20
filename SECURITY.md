@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest published MapKluss Companion release on Minecraft `1.21.11` and `1.21.8`.
+Security fixes are provided for the latest published MapKluss Companion release on Minecraft `26.2`, `1.21.11`, `1.21.8`, and `1.21.4`.
 
 ## Reporting a vulnerability
 

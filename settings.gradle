@@ -1,11 +1,4 @@
 pluginManagement {
-    resolutionStrategy {
-        eachPlugin {
-            if (requested.id.id == 'fabric-loom') {
-                useModule("net.fabricmc:fabric-loom:${requested.version}")
-            }
-        }
-    }
     def fabricMavenUrl = providers.gradleProperty('fabric_maven_url').orElse('https://maven.fabricmc.net/').get()
     def allowInsecureFabricMaven = providers.gradleProperty('fabric_maven_allow_insecure').orElse('false').get().toBoolean()
     repositories {
@@ -16,6 +9,10 @@ pluginManagement {
         gradlePluginPortal()
         mavenCentral()
     }
+}
+
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
 }
 
 dependencyResolutionManagement {

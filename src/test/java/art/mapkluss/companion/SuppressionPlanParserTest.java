@@ -12,6 +12,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class SuppressionPlanParserTest {
     @Test
+    void acceptsEveryReleasedMinecraftTarget() throws Exception {
+        for (String minecraftVersion : SuppressionPlanParser.SUPPORTED_MINECRAFT_VERSIONS) {
+            JsonObject root = JsonParser.parseString(new String(
+                SuppressionTestFixtures.planBytes(SuppressionTestFixtures.litematicBytes()),
+                StandardCharsets.UTF_8
+            )).getAsJsonObject();
+            root.getAsJsonObject("target").addProperty("minecraftVersion", minecraftVersion);
+
+            SuppressionPlanParser.Parsed parsed = SuppressionPlanParser.parse(
+                root.toString().getBytes(StandardCharsets.UTF_8));
+            assertEquals(minecraftVersion, parsed.plan().target().minecraftVersion());
+        }
+    }
+
+    @Test
     void acceptsV2WithSeparateStructureWorkflowAndCanvasContracts() throws Exception {
         JsonObject root = v2PlanJson();
 

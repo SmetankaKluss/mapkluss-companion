@@ -25,8 +25,10 @@ Client-side Fabric companion for [MapKluss](https://mapkluss.art): cloud art lib
 
 | Minecraft | Платформа | Java |
 | --- | --- | --- |
+| `26.2` | Fabric | `25+` |
 | `1.21.11` | Fabric | `21+` |
 | `1.21.8` | Fabric | `21+` |
+| `1.21.4` | Fabric | `21+` |
 
 Fabric Loader и Fabric API обязательны. Litematica и MaLiLib необязательны: без них Companion продолжает показывать этапы и подсветку, но не управляет размещением схематики.
 
@@ -37,22 +39,19 @@ Fabric Loader и Fabric API обязательны. Litematica и MaLiLib нео
 3. Поместите JAR в папку `mods` своего экземпляра Minecraft.
 4. Откройте меню MapKluss Companion в игре и подтвердите вход через сайт при необходимости.
 
-Не устанавливайте JAR для `1.21.8` в `1.21.11` и наоборот.
+Каждой версии Minecraft нужен свой JAR. Сборка `26.2` требует Java 25; три цели ветки `1.21.x` — Java 21.
 
 ### Сборка
 
-Нужна Java 21. Сборки выполняются последовательно:
+Нужна Java 25 для `26.2` и Java 21 для остальных целей. Gradle выбирает нужный toolchain автоматически. Сборки выполняются последовательно:
 
 ```bash
-./gradlew --no-daemon clean test build
-
-./gradlew --no-daemon clean test build \
-  -Pminecraft_version=1.21.8 \
-  -Pyarn_mappings=1.21.8+build.1 \
-  -Ploader_version=0.19.3
+for minecraft in 26.2 1.21.11 1.21.8 1.21.4; do
+  ./gradlew --no-daemon clean test build -Pminecraft_version="$minecraft"
+done
 ```
 
-Готовые JAR появляются в `build/libs`. CI проверяет обе версии Minecraft на каждом изменении.
+Готовые JAR появляются в `build/libs`. CI проверяет все четыре версии Minecraft на каждом изменении.
 
 ## English
 
@@ -69,9 +68,9 @@ Fabric Loader и Fabric API обязательны. Litematica и MaLiLib нео
 
 ### Requirements
 
-Minecraft `1.21.11` and `1.21.8` are supported as separate Fabric builds. Java 21, Fabric Loader, and Fabric API are required. Litematica and MaLiLib are optional.
+Minecraft `26.2`, `1.21.11`, `1.21.8`, and `1.21.4` are supported as separate Fabric builds. Minecraft `26.2` requires Java 25; the `1.21.x` targets require Java 21. Fabric Loader and Fabric API are required. Version-matched Litematica and MaLiLib builds are optional.
 
-Use the commands in the Russian build section to build both targets. The same commands run in CI.
+Use the commands in the Russian build section to build all targets. The same matrix runs in CI.
 
 ## Privacy and network access
 

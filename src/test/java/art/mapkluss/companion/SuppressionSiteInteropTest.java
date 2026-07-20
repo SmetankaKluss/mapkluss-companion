@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 final class SuppressionSiteInteropTest {
     @Test
-    void readsTheActualSiteGeneratedV3BundlesForBothTargets() throws Exception {
+    void readsTheActualSiteGeneratedV3BundlesForLegacyPublishedTargets() throws Exception {
         Path fixtureDir = fixtureDirectory();
 
         for (String minecraftVersion : new String[] {"1.21.11", "1.21.8"}) {
