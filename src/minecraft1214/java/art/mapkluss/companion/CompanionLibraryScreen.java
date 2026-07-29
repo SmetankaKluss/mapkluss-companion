@@ -19,8 +19,8 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 public final class CompanionLibraryScreen extends Screen {
-    private static final int PANEL_WIDTH = 500;
-    private static final int SECTION_WIDTH = 500;
+    private static final int PANEL_WIDTH = 1120;
+    private static final int SECTION_WIDTH = 1120;
     private static final int SIDE_RAIL_WIDTH = 134;
     private static final int SIDE_RAIL_GAP = 22;
     private static final int ROWS = 7;
@@ -84,24 +84,24 @@ public final class CompanionLibraryScreen extends Screen {
             addDrawableChild(MapKlussButton.builder(Text.literal("Обновить"), button -> loadLibrary())
                 .dimensions(left, row1, fourButtonWidth, 20).build());
             addDrawableChild(MapKlussButton.builder(Text.literal("Синхронизация"), button -> updateAll())
-                .dimensions(left + fourButtonWidth + gap, row1, fourButtonWidth, 20).build());
+                .technical().dimensions(left + fourButtonWidth + gap, row1, fourButtonWidth, 20).build());
             MapKlussButton.Builder accountBuilder = MapKlussButton.builder(Text.literal(accountButtonLabel()), button -> accountAction())
                 .dimensions(left + (fourButtonWidth + gap) * 2, row1, fourButtonWidth, 20);
             if (signedIn) accountBuilder.danger();
             accountButton = addDrawableChild(accountBuilder.tooltip(CompanionI18n.text(signedIn ? "Выйти из аккаунта MapKluss" : "Войти в MapKluss")).navigationOrder(signedIn ? 1000 : 0).build());
             addDrawableChild(MapKlussButton.builder(Text.literal("Открыть сайт"), button -> openSite("/cloud"))
-                .dimensions(left + (fourButtonWidth + gap) * 3, row1, fourButtonWidth, 20).build());
+                .technical().dimensions(left + (fourButtonWidth + gap) * 3, row1, fourButtonWidth, 20).build());
             int sixButtonWidth = Math.max(42, (panelWidth - gap * 4) / 5);
             addDrawableChild(MapKlussButton.builder(Text.literal("Коллекции"), button -> client().setScreen(new CompanionCollectionsScreen(this)))
                 .dimensions(left, row2, sixButtonWidth, 20).build());
             addDrawableChild(MapKlussButton.builder(Text.literal("Lens"), button -> client().setScreen(new LensScreen(this)))
-                .gold().dimensions(left + sixButtonWidth + gap, row2, sixButtonWidth, 20).build());
+                .special().dimensions(left + sixButtonWidth + gap, row2, sixButtonWidth, 20).build());
             addDrawableChild(MapKlussButton.builder(Text.literal("Скан карты"), button -> client().setScreen(new ScanScreen(this)))
                 .dimensions(left + (sixButtonWidth + gap) * 2, row2, sixButtonWidth, 20).build());
             addDrawableChild(MapKlussButton.builder(Text.literal("Трекер"), button -> client().setScreen(new TrackerOpenScreen(this)))
                 .dimensions(left + (sixButtonWidth + gap) * 3, row2, sixButtonWidth, 20).build());
             addDrawableChild(MapKlussButton.builder(Text.literal("Импорт Two-layer"), button -> client().setScreen(new SuppressionStartScreen(this, null)))
-                .gold().dimensions(left + (sixButtonWidth + gap) * 4, row2, sixButtonWidth, 20).build());
+                .special().dimensions(left + (sixButtonWidth + gap) * 4, row2, sixButtonWidth, 20).build());
         }
 
         int tabButtonWidth = Math.max(48, (panelWidth - gap * 3) / 4);
@@ -142,23 +142,23 @@ public final class CompanionLibraryScreen extends Screen {
         if (signedIn) accountBuilder.danger();
         accountButton = addDrawableChild(accountBuilder.tooltip(CompanionI18n.text(signedIn ? "Выйти из аккаунта MapKluss" : "Войти в MapKluss")).navigationOrder(signedIn ? 1000 : 0).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Сайт облака"), button -> openSite("/cloud"))
-            .dimensions(x, 104, buttonWidth, 20).build());
+            .technical().dimensions(x, 104, buttonWidth, 20).build());
 
         addDrawableChild(MapKlussButton.builder(Text.literal("Обновить"), button -> loadLibrary())
             .dimensions(x, 162, buttonWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Синхронизация"), button -> updateAll())
-            .dimensions(x, 188, buttonWidth, 20).build());
+            .technical().dimensions(x, 188, buttonWidth, 20).build());
 
         addDrawableChild(MapKlussButton.builder(Text.literal("Коллекции"), button -> client().setScreen(new CompanionCollectionsScreen(this)))
             .dimensions(x, 246, buttonWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Скан карты"), button -> client().setScreen(new ScanScreen(this)))
             .dimensions(x, 272, buttonWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Lens"), button -> client().setScreen(new LensScreen(this)))
-            .gold().dimensions(x, 298, buttonWidth, 20).build());
+            .special().dimensions(x, 298, buttonWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Трекер"), button -> client().setScreen(new TrackerOpenScreen(this)))
             .dimensions(x, 324, buttonWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Импорт Two-layer"), button -> client().setScreen(new SuppressionStartScreen(this, null)))
-            .gold().dimensions(x, 350, buttonWidth, 20).build());
+            .special().dimensions(x, 350, buttonWidth, 20).build());
 
     }
 
@@ -314,6 +314,7 @@ public final class CompanionLibraryScreen extends Screen {
                 CompanionRuntime logoutRuntime = runtime == null ? CompanionRuntime.create(client()) : runtime;
                 String warning = logoutRuntime.revokeAndClearSession();
                 runOnClient(() -> {
+                    LensManager.instance().clearForLogout();
                     runtime = logoutRuntime;
                     signedIn = false;
                     sessionStatus = "Сессия: вход не выполнен";
@@ -496,10 +497,11 @@ public final class CompanionLibraryScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        MapKlussUi.drawBackdrop(context, width, height);
         int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
         boolean sideRail = sideRailLayout(panelWidth, left);
-        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 10, MapKlussUi.panelBottom(height));
+        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 46, MapKlussUi.panelBottom(height));
         if (sideRail) {
             int railLeft = sideRailLeft(panelWidth, left);
             MapKlussUi.drawPanelAt(context, railLeft - 8, railLeft + SIDE_RAIL_WIDTH + 8, 46, MapKlussUi.panelBottom(height));
@@ -542,11 +544,9 @@ public final class CompanionLibraryScreen extends Screen {
 
     private void drawLibraryPreview(DrawContext context, CompanionLibraryItem item, int x, int rowY) {
         int y = rowY;
-        context.fill(x, y, x + THUMB_SIZE, y + THUMB_SIZE, 0xFF050509);
-        context.fill(x - 1, y - 1, x + THUMB_SIZE + 1, y, 0xAA57FF6E);
-        context.fill(x - 1, y + THUMB_SIZE, x + THUMB_SIZE + 1, y + THUMB_SIZE + 1, 0xAA57FF6E);
-        context.fill(x - 1, y, x, y + THUMB_SIZE, 0xAA57FF6E);
-        context.fill(x + THUMB_SIZE, y, x + THUMB_SIZE + 1, y + THUMB_SIZE, 0xAA57FF6E);
+        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
+        MapKlussUi.drawDataStrip(context, x - 4, x + panelWidth + 4, y - 4, y + 48);
+        MapKlussUi.drawPreviewWell(context, x - 2, y - 2, x + THUMB_SIZE + 2, y + THUMB_SIZE + 2);
 
         CompanionPreviewTextures.PreviewTexture preview = CompanionPreviewTextures.request(item);
         if (preview.ready()) {
@@ -681,7 +681,7 @@ public final class CompanionLibraryScreen extends Screen {
     }
 
     private boolean sideRailLayout(int panelWidth, int left) {
-        return height >= 380 && MapKlussUi.rightRailFits(width, panelWidth, SIDE_RAIL_WIDTH, SIDE_RAIL_GAP);
+        return false;
     }
 
     private int sideRailLeft(int panelWidth, int left) {
@@ -689,7 +689,7 @@ public final class CompanionLibraryScreen extends Screen {
     }
 
     private int screenLeft(int panelWidth) {
-        return MapKlussUi.leftWithRightRail(width, panelWidth, SIDE_RAIL_WIDTH, SIDE_RAIL_GAP);
+        return MapKlussUi.centeredLeft(width, panelWidth);
     }
 
     private List<CompanionLibraryItem> filteredItems() {

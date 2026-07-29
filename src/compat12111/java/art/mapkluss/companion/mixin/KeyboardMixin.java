@@ -1,6 +1,5 @@
 package art.mapkluss.companion.mixin;
 
-import art.mapkluss.companion.CompanionLibraryScreen;
 import art.mapkluss.companion.SuppressionManager;
 import net.minecraft.client.Keyboard;
 import net.minecraft.client.MinecraftClient;
@@ -20,9 +19,7 @@ public abstract class KeyboardMixin {
             return;
         }
 
-        if (input != null && input.key() == GLFW.GLFW_KEY_K && action == GLFW.GLFW_PRESS) {
-            client.setScreen(new CompanionLibraryScreen(null));
-        } else if (input != null && input.key() == GLFW.GLFW_KEY_J && action == GLFW.GLFW_PRESS) {
+        if (input != null && input.key() == GLFW.GLFW_KEY_J && action == GLFW.GLFW_PRESS) {
             SuppressionManager.instance().handleWorldAction(client);
         }
     }

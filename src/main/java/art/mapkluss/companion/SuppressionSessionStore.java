@@ -4,10 +4,10 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 
 public final class SuppressionSessionStore {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -23,10 +23,14 @@ public final class SuppressionSessionStore {
 
     public StoredSession load() throws IOException {
         if (!Files.exists(path)) return null;
-        if (Files.size(path) > 1024 * 1024) throw new IOException("Stored Two-layer session is too large");
         final StoredSession session;
         try {
-            session = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), StoredSession.class);
+            byte[] bytes;
+            try (InputStream input = Files.newInputStream(path)) {
+                bytes = CompanionApiClient.readBounded(input, 1024 * 1024);
+            }
+            if (bytes.length == 0) throw new IOException("Stored Two-layer session is empty");
+            session = GSON.fromJson(new String(bytes, StandardCharsets.UTF_8), StoredSession.class);
         } catch (RuntimeException error) {
             throw new IOException("Stored Two-layer session is invalid", error);
         }
@@ -49,18 +53,28 @@ public final class SuppressionSessionStore {
     }
 
     public void save(StoredSession session) throws IOException {
-        Files.createDirectories(path.getParent());
-        Path temp = Files.createTempFile(path.getParent(), "suppression-session", ".tmp");
-        try {
-            Files.writeString(temp, GSON.toJson(session), StandardCharsets.UTF_8);
-            try {
-                Files.move(temp, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
-                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(temp);
+        AtomicFiles.writePrivateUtf8(path, GSON.toJson(session));
+    }
+
+    static void validateForPlan(StoredSession session, SuppressionPlan plan, SuppressionStage restoredStage) throws IOException {
+        if (session == null || plan == null || restoredStage == null || plan.phases() == null || plan.phases().isEmpty()) {
+            throw new IOException("Stored Two-layer session has no matching plan state");
         }
+        int phase = session.phaseIndex();
+        int point = session.standPointIndex();
+        int lastPhase = plan.phases().size() - 1;
+        if (phase < 0 || phase > lastPhase) throw new IOException("Stored Two-layer phase is outside the plan");
+
+        boolean valid = switch (restoredStage) {
+            case WAITING_ANCHOR, ANCHOR_CONFIRM, BUILDING, INITIAL_MOVE -> phase == 0 && point == 0;
+            case INITIAL_VERIFY -> phase == 0 && point == plan.initialCapture().standPoints().size();
+            case REMOVE -> point == 0;
+            case MOVE -> point >= 0 && point < plan.phases().get(phase).standPoints().size();
+            case VERIFY, READY_NEXT -> point == plan.phases().get(phase).standPoints().size();
+            case COMPLETE -> phase == lastPhase && point == plan.phases().get(lastPhase).standPoints().size();
+            case INITIAL_EQUIP, INITIAL_DWELL, INITIAL_STOW, EQUIP, DWELL, STOW, PAUSED -> false;
+        };
+        if (!valid) throw new IOException("Stored Two-layer stage does not match its phase progress");
     }
 
     public void clear() throws IOException {

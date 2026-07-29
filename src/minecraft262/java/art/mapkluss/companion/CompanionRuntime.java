@@ -8,13 +8,11 @@ public final class CompanionRuntime {
     private final Path runDir;
     private final CompanionConfig config;
     private final CompanionSessionStore sessionStore;
-    private final String backendUrl;
 
-    private CompanionRuntime(Path runDir, CompanionConfig config, CompanionSessionStore sessionStore, String backendUrl) {
+    private CompanionRuntime(Path runDir, CompanionConfig config, CompanionSessionStore sessionStore) {
         this.runDir = runDir;
         this.config = config;
         this.sessionStore = sessionStore;
-        this.backendUrl = backendUrl;
         if (sessionStore.hasAccessToken()) {
             this.config.setAccessToken(sessionStore.accessToken());
         }
@@ -24,17 +22,17 @@ public final class CompanionRuntime {
         Path runDir = client.gameDirectory.toPath();
         CompanionSessionStore sessionStore = CompanionSessionStore.load(runDir);
         CompanionConfig config = CompanionConfig.load(runDir);
-        return new CompanionRuntime(runDir, config, sessionStore, CompanionBackendRouter.select(config));
+        return new CompanionRuntime(runDir, config, sessionStore);
     }
 
     public CompanionApiClient apiClient() {
-        CompanionApiClient api = new CompanionApiClient(backendUrl, config.supabaseAnonKey());
+        CompanionApiClient api = new CompanionApiClient(config);
         if (sessionStore.hasAccessToken()) api.setBearerToken(sessionStore.accessToken());
         return api;
     }
 
     public CompanionSyncService syncService() throws IOException {
-        return CompanionSyncService.create(runDir, config, backendUrl);
+        return CompanionSyncService.create(runDir, config);
     }
 
     public LibraryCache libraryCache() throws IOException {
@@ -50,7 +48,7 @@ public final class CompanionRuntime {
     }
 
     public String backendUrl() {
-        return backendUrl;
+        return CompanionBackendRouter.select(config);
     }
 
     public Path schematicDir() {

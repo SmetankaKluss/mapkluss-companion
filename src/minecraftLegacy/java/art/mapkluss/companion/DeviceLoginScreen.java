@@ -13,8 +13,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CompletableFuture;
 
 public final class DeviceLoginScreen extends Screen {
-    private static final int PANEL_WIDTH = 500;
-    private static final int SECTION_WIDTH = 500;
+    private static final int PANEL_WIDTH = 1120;
+    private static final int SECTION_WIDTH = 1120;
     private static final int ACTION_ROWS = 2;
     private static final int ACTION_ROW_HEIGHT = 34;
     private static final int ACTION_BUTTON_HEIGHT = 20;
@@ -33,7 +33,9 @@ public final class DeviceLoginScreen extends Screen {
     private String status = "";
     private boolean autoPollEnabled = true;
     private volatile int pollLoopGeneration;
+    private volatile boolean closed;
     private long loginExpiresAtMs;
+    private CompanionSessionInfo sessionInfo;
 
     public DeviceLoginScreen(Screen parent) {
         super(Text.literal("Вход MapKluss"));
@@ -42,6 +44,8 @@ public final class DeviceLoginScreen extends Screen {
 
     @Override
     protected void init() {
+        closed = false;
+        refreshSessionInfo();
         clearChildren();
         int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
@@ -56,14 +60,15 @@ public final class DeviceLoginScreen extends Screen {
             addDrawableChild(MapKlussButton.builder(Text.literal("Получить код"), button -> startLogin()).gold()
                 .dimensions(left, row1, buttonWidth, 20).build());
             autoPollButton = addDrawableChild(MapKlussButton.builder(autoPollButtonText(), button -> toggleAutoPoll())
+                .technical()
                 .selected(autoPollEnabled)
                 .dimensions(left + buttonWidth + gap, row1, buttonWidth, 20).build());
             pollButton = addDrawableChild(MapKlussButton.builder(Text.literal("Проверить"), button -> pollLogin())
-                .dimensions(left + (buttonWidth + gap) * 2, row1, buttonWidth, 20).build());
+                .technical().dimensions(left + (buttonWidth + gap) * 2, row1, buttonWidth, 20).build());
             copyButton = addDrawableChild(MapKlussButton.builder(Text.literal("Копировать"), button -> copyUserCode())
-                .dimensions(left, row2, halfWidth, 20).build());
+                .technical().dimensions(left, row2, halfWidth, 20).build());
             addDrawableChild(MapKlussButton.builder(Text.literal("Открыть сайт"), button -> openDevicePage())
-                .dimensions(left + halfWidth + gap, row2, panelWidth - halfWidth - gap, 20).build());
+                .technical().dimensions(left + halfWidth + gap, row2, panelWidth - halfWidth - gap, 20).build());
         }
         addDrawableChild(MapKlussUi.languageButton(this));
         addDrawableChild(MapKlussUi.backButton(this, parent, left));
@@ -74,15 +79,16 @@ public final class DeviceLoginScreen extends Screen {
         addDrawableChild(MapKlussButton.builder(Text.literal("Получить код"), button -> startLogin()).gold()
             .dimensions(railLeft, 78, SIDE_RAIL_WIDTH, 20).build());
         autoPollButton = addDrawableChild(MapKlussButton.builder(autoPollButtonText(), button -> toggleAutoPoll())
+            .technical()
             .selected(autoPollEnabled)
             .dimensions(railLeft, 104, SIDE_RAIL_WIDTH, 20).build());
 
         pollButton = addDrawableChild(MapKlussButton.builder(Text.literal("Проверить"), button -> pollLogin())
-            .dimensions(railLeft, 162, SIDE_RAIL_WIDTH, 20).build());
+            .technical().dimensions(railLeft, 162, SIDE_RAIL_WIDTH, 20).build());
         copyButton = addDrawableChild(MapKlussButton.builder(Text.literal("Копировать код"), button -> copyUserCode())
-            .dimensions(railLeft, 188, SIDE_RAIL_WIDTH, 20).build());
+            .technical().dimensions(railLeft, 188, SIDE_RAIL_WIDTH, 20).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Открыть сайт"), button -> openDevicePage())
-            .dimensions(railLeft, 214, SIDE_RAIL_WIDTH, 20).build());
+            .technical().dimensions(railLeft, 214, SIDE_RAIL_WIDTH, 20).build());
 
     }
 
@@ -93,7 +99,7 @@ public final class DeviceLoginScreen extends Screen {
     }
 
     private void startLogin() {
-        pollLoopGeneration++;
+        final int generation = ++pollLoopGeneration;
         status = "Создаю код входа...";
         MapKlussCompanionClient.LOGGER.info("Device login start requested.");
         CompletableFuture.runAsync(() -> {
@@ -101,13 +107,9 @@ public final class DeviceLoginScreen extends Screen {
                 CompanionRuntime runtime = CompanionRuntime.create(client());
                 DeviceStartResponse response = runtime.apiClient().startDeviceLogin();
                 MapKlussCompanionClient.LOGGER.info(
-                    "Device login code created: userCode={} expiresIn={}s poll={}s verifyUrl={}",
-                    response.userCode(),
-                    response.expiresIn(),
-                    response.interval(),
-                    response.verificationUri()
+                    "Device login code created: expiresIn={}s poll={}s.", response.expiresIn(), response.interval()
                 );
-                runOnClient(() -> {
+                runOnClient(generation, () -> {
                     login = response;
                     loginExpiresAtMs = System.currentTimeMillis() + Math.max(1, response.expiresIn()) * 1000L;
                     status = "Код готов. Откройте сайт и подтвердите вход.";
@@ -118,7 +120,7 @@ public final class DeviceLoginScreen extends Screen {
                 });
             } catch (Exception e) {
                 MapKlussCompanionClient.LOGGER.error("Device login start failed.", e);
-                runOnClient(() -> status = CompanionUiErrors.message("login", e));
+                runOnClient(generation, () -> status = CompanionUiErrors.message("login", e));
             }
         });
     }
@@ -128,12 +130,13 @@ public final class DeviceLoginScreen extends Screen {
             status = "Сначала нажмите «Получить код»";
             return;
         }
+        final int generation = pollLoopGeneration;
         status = "Проверяю подтверждение...";
         CompletableFuture.runAsync(() -> {
             try {
-                pollLoginOnce();
+                pollLoginOnce(generation);
             } catch (Exception e) {
-                runOnClient(() -> status = CompanionUiErrors.message("login", e));
+                runOnClient(generation, () -> status = CompanionUiErrors.message("login", e));
             }
         });
     }
@@ -158,8 +161,7 @@ public final class DeviceLoginScreen extends Screen {
         CompletableFuture.runAsync(() -> {
             while (autoPollEnabled && login != null && generation == pollLoopGeneration) {
                 if (System.currentTimeMillis() >= loginExpiresAtMs) {
-                    runOnClient(() -> {
-                        if (generation != pollLoopGeneration) return;
+                    runOnClient(generation, () -> {
                         status = "Код истек. Нажмите Получить код еще раз.";
                         login = null;
                         updateButtons();
@@ -174,10 +176,9 @@ public final class DeviceLoginScreen extends Screen {
                 }
                 if (!autoPollEnabled || login == null || generation != pollLoopGeneration) return;
                 try {
-                    if (pollLoginOnce()) return;
+                    if (pollLoginOnce(generation)) return;
                 } catch (Exception e) {
-                    runOnClient(() -> {
-                        if (generation != pollLoopGeneration) return;
+                    runOnClient(generation, () -> {
                         status = CompanionUiErrors.message("login", e);
                         updateButtons();
                     });
@@ -187,26 +188,33 @@ public final class DeviceLoginScreen extends Screen {
         });
     }
 
-    private boolean pollLoginOnce() throws Exception {
-        if (login == null) return true;
+    private boolean pollLoginOnce(int generation) throws Exception {
+        if (!isCurrent(generation) || login == null) return true;
         CompanionRuntime runtime = CompanionRuntime.create(client());
         DevicePollResponse response = runtime.apiClient().pollDeviceLogin(login.deviceCode());
+        if (!isCurrent(generation)) return true;
         if ("approved".equals(response.status()) && response.accessToken() != null) {
-            pollLoopGeneration++;
             MapKlussCompanionClient.LOGGER.info("Device login approved for user {}.", response.userId());
-            runtime.saveSession(response.accessToken(), response.userId());
-            runOnClient(() -> {
-                login = null;
-                status = "Вход подтвержден. Возвращаю в библиотеку...";
-                updateButtons();
-                client().setScreen(parent);
+            runOnClient(generation, () -> {
+                try {
+                    runtime.saveSession(response.accessToken(), response.userId());
+                    pollLoopGeneration++;
+                    login = null;
+                    sessionInfo = runtime.sessionInfo();
+                    status = "Вход подтвержден. Возвращаю в библиотеку...";
+                    updateButtons();
+                    client().setScreen(parent);
+                } catch (Exception error) {
+                    status = CompanionUiErrors.message("login", error);
+                    updateButtons();
+                }
             });
             return true;
         }
         if ("expired".equalsIgnoreCase(response.status()) || "denied".equalsIgnoreCase(response.status())) {
-            pollLoopGeneration++;
             MapKlussCompanionClient.LOGGER.warn("Device login ended with status {}.", response.status());
-            runOnClient(() -> {
+            runOnClient(generation, () -> {
+                pollLoopGeneration++;
                 login = null;
                 status = loginStatus(response.status());
                 updateButtons();
@@ -214,7 +222,7 @@ public final class DeviceLoginScreen extends Screen {
             return true;
         }
         MapKlussCompanionClient.LOGGER.info("Device login poll status: {}.", response.status());
-        runOnClient(() -> status = loginStatus(response.status()));
+        runOnClient(generation, () -> status = loginStatus(response.status()));
         return false;
     }
 
@@ -242,11 +250,12 @@ public final class DeviceLoginScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        MapKlussUi.drawBackdrop(context, width, height);
         int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
         boolean sideRail = sideRailLayout(panelWidth, left);
         int controlsTop = actionTop();
-        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 14, MapKlussUi.panelBottom(height));
+        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 46, MapKlussUi.panelBottom(height));
         if (sideRail) {
             int railLeft = sideRailLeft(panelWidth, left);
             MapKlussUi.drawPanelAt(context, railLeft - 8, railLeft + SIDE_RAIL_WIDTH + 8, 46, MapKlussUi.panelBottom(height));
@@ -304,7 +313,7 @@ public final class DeviceLoginScreen extends Screen {
     }
 
     private boolean sideRailLayout(int panelWidth, int left) {
-        return height >= 300 && MapKlussUi.rightRailFits(width, panelWidth, SIDE_RAIL_WIDTH, SIDE_RAIL_GAP);
+        return false;
     }
 
     private int sideRailLeft(int panelWidth, int left) {
@@ -312,7 +321,7 @@ public final class DeviceLoginScreen extends Screen {
     }
 
     private int screenLeft(int panelWidth) {
-        return MapKlussUi.leftWithRightRail(width, panelWidth, SIDE_RAIL_WIDTH, SIDE_RAIL_GAP);
+        return MapKlussUi.centeredLeft(width, panelWidth);
     }
 
     private Text autoPollButtonText() {
@@ -336,7 +345,8 @@ public final class DeviceLoginScreen extends Screen {
 
     private String sessionSummary() {
         try {
-            CompanionSessionInfo session = CompanionRuntime.create(client()).sessionInfo();
+            CompanionSessionInfo session = sessionInfo;
+            if (session == null) return "Сессия: недоступна";
             if (!session.isSignedIn()) return "Сессия: вход не выполнен";
             String saved = formatInstant(session.savedAt());
             if (CompanionI18n.english(client())) {
@@ -354,7 +364,8 @@ public final class DeviceLoginScreen extends Screen {
 
     private int sessionColor() {
         try {
-            CompanionSessionInfo session = CompanionRuntime.create(client()).sessionInfo();
+            CompanionSessionInfo session = sessionInfo;
+            if (session == null) return 0xFFD9C27A;
             if (!session.isSignedIn()) return 0xFFD9C27A;
             return session.isExpired() ? 0xFFFF9B7D : 0xFF8FE388;
         } catch (Exception e) {
@@ -374,12 +385,34 @@ public final class DeviceLoginScreen extends Screen {
         return MinecraftClient.getInstance();
     }
 
-    private void runOnClient(Runnable task) {
-        client().execute(task);
+    private void refreshSessionInfo() {
+        try {
+            sessionInfo = CompanionRuntime.create(client()).sessionInfo();
+        } catch (Exception ignored) {
+            sessionInfo = null;
+        }
+    }
+
+    private boolean isCurrent(int generation) {
+        return !closed && generation == pollLoopGeneration;
+    }
+
+    private void runOnClient(int generation, Runnable task) {
+        client().execute(() -> {
+            if (isCurrent(generation) && client().currentScreen == this) task.run();
+        });
+    }
+
+    @Override
+    public void removed() {
+        closed = true;
+        pollLoopGeneration++;
+        super.removed();
     }
 
     @Override
     public void close() {
+        closed = true;
         pollLoopGeneration++;
         super.close();
     }

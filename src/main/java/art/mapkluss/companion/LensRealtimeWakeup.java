@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicLong;
 final class LensRealtimeWakeup implements WebSocket.Listener, AutoCloseable {
     private static final Gson GSON = new Gson();
     static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(8);
+    private static final int MAX_MESSAGE_CHARACTERS = 256 * 1024;
     private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
     private static final AtomicLong REFERENCES = new AtomicLong();
     private static final ScheduledExecutorService SCHEDULER = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -32,7 +33,7 @@ final class LensRealtimeWakeup implements WebSocket.Listener, AutoCloseable {
     private final LensDtos.Realtime capability;
     private final String websocketUrl;
     private final Runnable wakeup;
-    private final StringBuilder messages = new StringBuilder();
+    private final BoundedTextMessageAccumulator messages = new BoundedTextMessageAccumulator(MAX_MESSAGE_CHARACTERS);
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean connecting = new AtomicBoolean();
     private final AtomicBoolean reconnectScheduled = new AtomicBoolean();
@@ -98,6 +99,7 @@ final class LensRealtimeWakeup implements WebSocket.Listener, AutoCloseable {
         }
         reconnectScheduled.set(false);
         healthy = false;
+        messages.reset();
         WebSocket previousSocket = socket;
         socket = webSocket;
         if (previousSocket != null && previousSocket != webSocket) {
@@ -125,10 +127,15 @@ final class LensRealtimeWakeup implements WebSocket.Listener, AutoCloseable {
 
     @Override
     public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
-        messages.append(data);
-        if (last) {
-            String message = messages.toString();
-            messages.setLength(0);
+        if (closed.get() || socket != webSocket) return null;
+        BoundedTextMessageAccumulator.Result result = messages.append(data, last);
+        if (result.overflow()) {
+            healthy = false;
+            webSocket.sendClose(1009, "Lens Realtime message is too large");
+            return null;
+        }
+        if (result.complete()) {
+            String message = result.message();
             if (message.contains("phx_reply") && message.contains("\"status\":\"ok\"")) {
                 healthy = true;
                 reconnectAttempt.set(0);
@@ -144,6 +151,7 @@ final class LensRealtimeWakeup implements WebSocket.Listener, AutoCloseable {
         if (socket != null && socket != webSocket) return WebSocket.Listener.super.onClose(webSocket, statusCode, reason);
         if (socket == webSocket) socket = null;
         healthy = false;
+        messages.reset();
         cancelHeartbeat();
         scheduleReconnect();
         return WebSocket.Listener.super.onClose(webSocket, statusCode, reason);
@@ -155,6 +163,7 @@ final class LensRealtimeWakeup implements WebSocket.Listener, AutoCloseable {
         if (socket == webSocket) socket = null;
         connecting.set(false);
         healthy = false;
+        messages.reset();
         cancelHeartbeat();
         if (!closed.get()) MapKlussCompanionClient.LOGGER.debug("Lens Realtime disconnected; polling remains active.", error);
         scheduleReconnect();
@@ -167,6 +176,7 @@ final class LensRealtimeWakeup implements WebSocket.Listener, AutoCloseable {
         socket = null;
         connecting.set(false);
         healthy = false;
+        messages.reset();
         cancelHeartbeat();
         ScheduledFuture<?> pendingReconnect = reconnect;
         reconnect = null;

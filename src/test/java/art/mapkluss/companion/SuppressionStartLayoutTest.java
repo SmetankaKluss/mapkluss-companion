@@ -14,10 +14,11 @@ final class SuppressionStartLayoutTest {
             assertTrue(layout.top() >= 6);
             assertTrue(layout.backY() + 20 <= layout.bottom());
             assertTrue(layout.statusY() < layout.bottom());
-            assertTrue(layout.compact() || layout.statusY() >= layout.backY() + 20);
-            assertTrue(!layout.compact() || layout.statusY() < layout.cloudY());
+            assertTrue(layout.statusY() >= layout.sessionY() + 12);
+            assertTrue(layout.statusY() + 11 <= layout.backY());
             assertTrue(layout.guidanceLines() == (layout.compact() ? 1 : 2));
-            assertTrue(!layout.compact() || layout.statusY() >= layout.top() + 38 + 11);
+            assertTrue(layout.cloudY() >= layout.top() + 40);
+            assertTrue(layout.localY() >= layout.cloudY());
         }
     }
 }

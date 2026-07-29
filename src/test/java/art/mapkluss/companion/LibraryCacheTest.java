@@ -15,6 +15,78 @@ final class LibraryCacheTest {
     Path tempDir;
 
     @Test
+    void independentlyLoadedCachesDoNotLoseEachOthersViews() throws Exception {
+        Path cachePath = tempDir.resolve("shared-library-cache.json");
+        LibraryCache first = LibraryCache.load(cachePath);
+        LibraryCache second = LibraryCache.load(cachePath);
+        first.write("user-1", "recent", List.of(item("art-1", "First")));
+        second.write("user-2", "recent", List.of(item("art-2", "Second")));
+
+        LibraryCache merged = LibraryCache.load(cachePath);
+        assertEquals("First", merged.read("user-1", "recent").items().getFirst().title());
+        assertEquals("Second", merged.read("user-2", "recent").items().getFirst().title());
+    }
+
+    @Test
+    void semanticCollectionUpdatesPreserveConcurrentCollections() throws Exception {
+        Path cachePath = tempDir.resolve("shared-collections-cache.json");
+        LibraryCache first = LibraryCache.load(cachePath);
+        LibraryCache second = LibraryCache.load(cachePath);
+        CompanionCollection alpha = new CompanionCollection("a", "Alpha", null, null, 1);
+        CompanionCollection beta = new CompanionCollection("b", "Beta", null, null, 2);
+        first.upsertCollection("user-1", alpha);
+        second.upsertCollection("user-1", beta);
+        first.removeCollection("user-1", "a");
+
+        List<CompanionCollection> collections = LibraryCache.load(cachePath)
+            .readCollections("user-1").items();
+        assertEquals(1, collections.size());
+        assertEquals("b", collections.getFirst().id());
+    }
+
+    @Test
+    void collectionMembershipTransitionUpdatesCountOnlyOnce() throws Exception {
+        Path cachePath = tempDir.resolve("membership-cache.json");
+        LibraryCache first = LibraryCache.load(cachePath);
+        LibraryCache second = LibraryCache.load(cachePath);
+        first.writeCollections("user-1", List.of(
+            new CompanionCollection("a", "Alpha", null, null, 0)
+        ));
+        CompanionLibraryItem art = item("art-1", "First");
+
+        first.setCollectionItemState("user-1", "a", art, false, true);
+        second.setCollectionItemState("user-1", "a", art, false, true);
+
+        LibraryCache loaded = LibraryCache.load(cachePath);
+        assertEquals(1, loaded.readCollections("user-1").items().getFirst().itemCount());
+    }
+
+    @Test
+    void initialMembershipSeedPreservesAuthoritativeCollectionCount() throws Exception {
+        Path cachePath = tempDir.resolve("membership-seed-cache.json");
+        LibraryCache cache = LibraryCache.load(cachePath);
+        cache.writeCollections("user-1", List.of(
+            new CompanionCollection("a", "Alpha", null, null, 3)
+        ));
+        CompanionLibraryItem art = item("art-1", "First");
+
+        cache.setCollectionItemState("user-1", "a", art, true, true);
+        assertEquals(3, LibraryCache.load(cachePath)
+            .readCollections("user-1").items().getFirst().itemCount());
+
+        LibraryCache.load(cachePath).setCollectionItemState("user-1", "a", art, true, false);
+        assertEquals(2, LibraryCache.load(cachePath)
+            .readCollections("user-1").items().getFirst().itemCount());
+    }
+
+    private static CompanionLibraryItem item(String id, String title) {
+        return new CompanionLibraryItem(
+            id, "version-1", title, "unlisted", new CompanionManifest.Grid(1, 1),
+            "classic", null, "2026-07-24T00:00:00Z", false
+        );
+    }
+
+    @Test
     void savesAndReloadsLibraryView() throws Exception {
         Path cachePath = tempDir.resolve("library-cache.json");
         LibraryCache cache = LibraryCache.load(cachePath);

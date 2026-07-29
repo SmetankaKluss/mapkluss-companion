@@ -13,22 +13,23 @@ final class LensQuadGeometryTest {
     @Test
     void placesPreviewOnTheFrontFaceOfTheItemFrame() {
         BlockPos block = new BlockPos(12, 64, -7);
-        for (Direction facing : Direction.Type.HORIZONTAL) {
+        for (Direction facing : Direction.values()) {
             LensQuadGeometry.Quad quad = LensQuadGeometry.quad(block, facing);
             Vec3d center = average(quad.bottomLeft(), quad.bottomRight(), quad.topRight(), quad.topLeft());
             Vec3d expected = block.toCenterPos().add(
                 facing.getOffsetX() * LensQuadGeometry.ART_PLANE_OFFSET,
-                0,
+                facing.getOffsetY() * LensQuadGeometry.ART_PLANE_OFFSET,
                 facing.getOffsetZ() * LensQuadGeometry.ART_PLANE_OFFSET
             );
             assertVec(expected, center);
+            assertEquals(facing, quad.normal());
         }
     }
 
     @Test
     void adjacentCellsShareTheSameEdgeWithoutGaps() {
         BlockPos anchor = new BlockPos(0, 64, 0);
-        for (Direction facing : Direction.Type.HORIZONTAL) {
+        for (Direction facing : Direction.values()) {
             FrameWallGeometry.Coord origin = FrameWallGeometry.fromBlockPos(anchor, facing);
             BlockPos rightCell = FrameWallGeometry.toBlockPos(facing, FrameWallGeometry.cell(origin, 1, 0));
             LensQuadGeometry.Quad left = LensQuadGeometry.quad(anchor, facing);
@@ -40,7 +41,7 @@ final class LensQuadGeometryTest {
 
     @Test
     void everyCellIsExactlyOneBlockWideAndTall() {
-        for (Direction facing : Direction.Type.HORIZONTAL) {
+        for (Direction facing : Direction.values()) {
             LensQuadGeometry.Quad quad = LensQuadGeometry.quad(BlockPos.ORIGIN, facing);
             assertEquals(1.0, quad.bottomLeft().distanceTo(quad.bottomRight()), EPSILON);
             assertEquals(1.0, quad.bottomLeft().distanceTo(quad.topLeft()), EPSILON);

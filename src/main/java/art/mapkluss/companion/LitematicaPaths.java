@@ -51,6 +51,10 @@ public final class LitematicaPaths {
         return minecraftRunDir.resolve("config").resolve("mapkluss-companion").resolve("config.json");
     }
 
+    public static Path updateNoticePath(Path minecraftRunDir) {
+        return minecraftRunDir.resolve("config").resolve("mapkluss-companion").resolve("update-notice.json");
+    }
+
     public static Path modsDir(Path minecraftRunDir) {
         return minecraftRunDir.resolve("mods");
     }

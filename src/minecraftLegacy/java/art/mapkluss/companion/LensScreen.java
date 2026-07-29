@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public final class LensScreen extends Screen {
-    private static final int PANEL_WIDTH = 540;
+    private static final int PANEL_WIDTH = 1120;
     private static final int INPUT_Y = 88;
     private static final int TABS_Y = 118;
     private static final int LIST_Y = 155;
@@ -76,15 +76,15 @@ public final class LensScreen extends Screen {
         addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Войти по коду"), button -> {
                 rememberCode();
                 manager.join(client(), code);
-            }).dimensions(left + codeWidth + gap, INPUT_Y, joinWidth, 20).build());
+            }).special().dimensions(left + codeWidth + gap, INPUT_Y, joinWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Обновить"), button -> manager.refreshSessions(client()))
-            .dimensions(left + codeWidth + joinWidth + gap * 2, INPUT_Y, refreshWidth, 20).build());
+            .technical().dimensions(left + codeWidth + joinWidth + gap * 2, INPUT_Y, refreshWidth, 20).build());
 
         int half = Math.max(80, (panelWidth - gap) / 2);
         addDrawableChild(MapKlussButton.builder(Text.literal(sessionTabLabel()), button -> openOrAdvance(false))
-            .selected(!placementsTab).dimensions(left, TABS_Y, half, 20).build());
+            .special().selected(!placementsTab).dimensions(left, TABS_Y, half, 20).build());
         addDrawableChild(MapKlussButton.builder(Text.literal(placementTabLabel()), button -> openOrAdvance(true))
-            .selected(placementsTab).dimensions(left + half + gap, TABS_Y, panelWidth - half - gap, 20).build());
+            .special().selected(placementsTab).dimensions(left + half + gap, TABS_Y, panelWidth - half - gap, 20).build());
 
         reconcileSelection();
         if (placementsTab) {
@@ -136,10 +136,10 @@ public final class LensScreen extends Screen {
         addVisibilityButton(left, controlsY, half, "personal", "Личное");
         addVisibilityButton(left + half + gap, controlsY, panelWidth - half - gap, "group", "Группа");
         LensDtos.Session selected = selectedSession();
-        addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Закрепить по левой нижней рамке"), button ->
+        addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Закрепить по угловой рамке"), button ->
                 manager.anchorTarget(client(), selectedSessionId, visibility))
-            .gold()
-            .tooltip(CompanionI18n.text(selected == null ? "Сначала выберите сессию Lens" : "Закрепить по левой нижней рамке"))
+            .special()
+            .tooltip(CompanionI18n.text(selected == null ? "Сначала выберите сессию Lens" : "Закрепить по угловой рамке"))
             .dimensions(left, controlsY + 26, panelWidth, 20)
             .enabledWhen(() -> selectedSession() != null && selectedSession().ownedByUser())
             .build());
@@ -314,9 +314,15 @@ public final class LensScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        MapKlussUi.drawBackdrop(context, width, height);
         int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = MapKlussUi.centeredLeft(width, panelWidth);
-        MapKlussUi.drawPanel(context, width, PANEL_WIDTH, 18, MapKlussUi.panelBottom(height));
+        MapKlussUi.drawPanel(context, width, PANEL_WIDTH, 46, MapKlussUi.panelBottom(height));
+        MapKlussUi.drawSectionAt(context, textRenderer, null, left, panelWidth, INPUT_Y - 14, 38);
+        int listTop = TABS_Y - 5;
+        int listBottom = Math.min(MapKlussUi.panelBottom(height) - 4, MapKlussUi.contentBottom(height));
+        MapKlussUi.drawSectionAt(context, textRenderer, placementsTab ? "Размещения" : "Сессии",
+            left, panelWidth, listTop, Math.max(0, listBottom - listTop));
         MapKlussUi.drawHeader(context, textRenderer, "MapKluss Lens", "", width, 28);
         MapKlussUi.drawFieldLabel(context, textRenderer, "Код Lens", left, INPUT_Y, panelWidth);
 

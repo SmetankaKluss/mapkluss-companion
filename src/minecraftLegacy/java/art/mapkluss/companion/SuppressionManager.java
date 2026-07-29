@@ -11,6 +11,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -274,10 +275,13 @@ public final class SuppressionManager {
             }
             SuppressionPlanParser.Parsed parsed = SuppressionPlanParser.parse(planBytes);
             requireClientVersion(parsed.plan());
+            SuppressionReferenceLitematic.validateSource(parsed.plan(), litematicBytes);
+            SuppressionStage restoredStage = SuppressionStateLogic.restoredStage(stored.formatVersion(), stored.stage());
+            SuppressionSessionStore.validateForPlan(stored, parsed.plan(), restoredStage);
             bundle = new SuppressionBundle(parsed, planBytes, litematicBytes, stored.planSha256(), stored.litematicSha256(),
                 stored.artId(), stored.versionId(), stored.title(), "restored");
             installed = new SuppressionBundleInstaller.Installed(planPath, schematicPath);
-            stage = SuppressionStateLogic.restoredStage(stored.formatVersion(), stored.stage());
+            stage = restoredStage;
             anchor = stage == SuppressionStage.WAITING_ANCHOR ? null : new BlockPos(stored.anchorX(), stored.anchorY(), stored.anchorZ());
             worldHash = stage == SuppressionStage.WAITING_ANCHOR ? null : stored.worldHash();
             dimension = stage == SuppressionStage.WAITING_ANCHOR ? null : stored.dimension();
@@ -287,7 +291,7 @@ public final class SuppressionManager {
             dwellTicks = 0;
             mapUpdateObserved = false;
             stablePointTicks = 0;
-            manualOverrideArmed = stored.manualOverrideArmed();
+            manualOverrideArmed = false;
             activeGuidePhase = -1;
             buildPlacementSyncPending = stage != SuppressionStage.WAITING_ANCHOR
                 && stage != SuppressionStage.ANCHOR_CONFIRM
@@ -776,9 +780,12 @@ public final class SuppressionManager {
     }
 
     private static byte[] readManagedFile(Path path, int maxBytes, String label) throws IOException {
-        long size = Files.size(path);
-        if (size < 1 || size > maxBytes) throw new IOException(label + " size is outside the safe limit");
-        return Files.readAllBytes(path);
+        byte[] bytes;
+        try (InputStream input = Files.newInputStream(path)) {
+            bytes = CompanionApiClient.readBounded(input, maxBytes);
+        }
+        if (bytes.length < 1) throw new IOException(label + " size is outside the safe limit");
+        return bytes;
     }
 
     private void persist() throws IOException {

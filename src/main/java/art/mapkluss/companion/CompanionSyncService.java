@@ -23,8 +23,8 @@ public final class CompanionSyncService {
         this.litematicInstaller = new LitematicInstaller(schematicDir, installedIndex);
     }
 
-    public static CompanionSyncService create(Path minecraftRunDir, CompanionConfig config, String backendUrl) throws IOException {
-        CompanionApiClient api = new CompanionApiClient(backendUrl, config.supabaseAnonKey());
+    public static CompanionSyncService create(Path minecraftRunDir, CompanionConfig config) throws IOException {
+        CompanionApiClient api = new CompanionApiClient(config);
         if (config.accessToken() != null && !config.accessToken().isBlank()) {
             api.setBearerToken(config.accessToken());
         }

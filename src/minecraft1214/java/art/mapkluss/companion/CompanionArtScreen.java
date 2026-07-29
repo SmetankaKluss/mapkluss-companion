@@ -23,10 +23,10 @@ import java.util.concurrent.CompletableFuture;
 
 public final class CompanionArtScreen extends Screen {
     private static final int PANEL_WIDTH = 500;
-    private static final int SIDE_PANEL_WIDTH = 308;
+    private static final int SIDE_PANEL_WIDTH = 420;
     private static final int SIDE_LAYOUT_MIN_WIDTH = 620;
-    private static final int SIDE_MARGIN = 22;
-    private static final int PREVIEW_GAP = 18;
+    private static final int SIDE_MARGIN = 16;
+    private static final int PREVIEW_GAP = 14;
     private static final int SECTION_WIDTH = 500;
     private static final int ACTION_ROWS = 5;
     private static final int ACTION_ROW_HEIGHT = 34;
@@ -162,9 +162,9 @@ public final class CompanionArtScreen extends Screen {
 
     private void addCompactLinkActions(int left, int panelWidth, int gap, int rowY) {
         int w = Math.max(46, (panelWidth - gap * 2) / 3);
-        addDrawableChild(MapKlussButton.builder(Text.literal("Сайт арта"), button -> openSite("/art/" + artId)).dimensions(left, rowY, w, 20).build());
-        addDrawableChild(MapKlussButton.builder(Text.literal("Редактор"), button -> openSite("/?art=" + artId)).dimensions(left + w + gap, rowY, w, 20).build());
-        addDrawableChild(MapKlussButton.builder(Text.literal("Трекер"), button -> openArtTracker()).dimensions(left + (w + gap) * 2, rowY, panelWidth - (w + gap) * 2, 20).build());
+        addDrawableChild(MapKlussButton.builder(Text.literal("Сайт арта"), button -> openSite("/art/" + artId)).technical().dimensions(left, rowY, w, 20).build());
+        addDrawableChild(MapKlussButton.builder(Text.literal("Редактор"), button -> openSite("/?art=" + artId)).technical().dimensions(left + w + gap, rowY, w, 20).build());
+        addDrawableChild(MapKlussButton.builder(Text.literal("Трекер"), button -> openArtTracker()).technical().dimensions(left + (w + gap) * 2, rowY, panelWidth - (w + gap) * 2, 20).build());
     }
 
     private void addCompactLibraryActions(int left, int panelWidth, int gap, int rowY) {
@@ -177,19 +177,19 @@ public final class CompanionArtScreen extends Screen {
 
     private void addCompactExportActions(int left, int panelWidth, int gap, int rowY) {
         int w = Math.max(46, (panelWidth - gap * 3) / 4);
-        pngButton = addDrawableChild(MapKlussButton.builder(Text.literal("PNG"), button -> downloadFirst("preview_png")).dimensions(left, rowY, w, 20).build());
-        materialsButton = addDrawableChild(MapKlussButton.builder(Text.literal("Материалы"), button -> downloadFirst("materials_txt", "materials_csv")).dimensions(left + w + gap, rowY, w, 20).build());
-        commandsButton = addDrawableChild(MapKlussButton.builder(Text.literal("Команды"), button -> downloadFirst("frame_commands")).dimensions(left + (w + gap) * 2, rowY, w, 20).build());
-        datapackButton = addDrawableChild(MapKlussButton.builder(Text.literal("Датапак"), button -> downloadFirst("frame_datapack")).dimensions(left + (w + gap) * 3, rowY, panelWidth - (w + gap) * 3, 20).build());
+        pngButton = addDrawableChild(MapKlussButton.builder(Text.literal("PNG"), button -> downloadFirst("preview_png")).exportAction().dimensions(left, rowY, w, 20).build());
+        materialsButton = addDrawableChild(MapKlussButton.builder(Text.literal("Материалы"), button -> downloadFirst("materials_txt", "materials_csv")).exportAction().dimensions(left + w + gap, rowY, w, 20).build());
+        commandsButton = addDrawableChild(MapKlussButton.builder(Text.literal("Команды"), button -> downloadFirst("frame_commands")).exportAction().dimensions(left + (w + gap) * 2, rowY, w, 20).build());
+        datapackButton = addDrawableChild(MapKlussButton.builder(Text.literal("Датапак"), button -> downloadFirst("frame_datapack")).exportAction().dimensions(left + (w + gap) * 3, rowY, panelWidth - (w + gap) * 3, 20).build());
     }
 
     private void addCompactArchiveActions(int left, int panelWidth, int gap, int rowY) {
         int w = Math.max(42, (panelWidth - gap * 4) / 5);
         autoFrameButton = addDrawableChild(MapKlussButton.builder(Text.literal("Для рамок"), button -> prepareAutoFrame()).gold().dimensions(left, rowY, w, 20).build());
-        suppressionButton = addDrawableChild(MapKlussButton.builder(Text.literal("Two-layer"), button -> openSuppression()).gold().dimensions(left + w + gap, rowY, w, 20).build());
+        suppressionButton = addDrawableChild(MapKlussButton.builder(Text.literal("Two-layer"), button -> openSuppression()).special().dimensions(left + w + gap, rowY, w, 20).build());
         mapDatButton = addDrawableChild(MapKlussButton.builder(Text.literal("Импорт MapDat"), button -> importMapDat()).dimensions(left + (w + gap) * 2, rowY, w, 20).build());
-        downloadMapDatButton = addDrawableChild(MapKlussButton.builder(Text.literal("Скачать MapDat"), button -> downloadFirst("mapdat_zip")).dimensions(left + (w + gap) * 3, rowY, w, 20).build());
-        projectButton = addDrawableChild(MapKlussButton.builder(Text.literal("Скачать проект"), button -> downloadFirst("project")).dimensions(left + (w + gap) * 4, rowY, panelWidth - (w + gap) * 4, 20).build());
+        downloadMapDatButton = addDrawableChild(MapKlussButton.builder(Text.literal("Скачать MapDat"), button -> downloadFirst("mapdat_zip")).exportAction().dimensions(left + (w + gap) * 3, rowY, w, 20).build());
+        projectButton = addDrawableChild(MapKlussButton.builder(Text.literal("Скачать проект"), button -> downloadFirst("project")).exportAction().dimensions(left + (w + gap) * 4, rowY, panelWidth - (w + gap) * 4, 20).build());
     }
 
     private void addDistributedActionControls(int left, int panelWidth) {
@@ -212,11 +212,11 @@ public final class CompanionArtScreen extends Screen {
             .dimensions(left, schemaY + 72, columnWidth, 20).build());
 
         addDrawableChild(MapKlussButton.builder(Text.literal("Сайт арта"), button -> openSite("/art/" + artId))
-            .dimensions(right, navigationY, columnWidth, 20).build());
+            .technical().dimensions(right, navigationY, columnWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Редактор"), button -> openSite("/?art=" + artId))
-            .dimensions(right, navigationY + 24, columnWidth, 20).build());
+            .technical().dimensions(right, navigationY + 24, columnWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Трекер"), button -> openArtTracker())
-            .dimensions(right, navigationY + 48, columnWidth, 20).build());
+            .technical().dimensions(right, navigationY + 48, columnWidth, 20).build());
 
         favoriteButton = addDrawableChild(MapKlussButton.builder(favoriteButtonText(), button -> toggleFavorite())
             .selected(manifest != null && manifest.isFavorite())
@@ -229,24 +229,24 @@ public final class CompanionArtScreen extends Screen {
             .dimensions(left, libraryY + 72, columnWidth, 20).build());
 
         pngButton = addDrawableChild(MapKlussButton.builder(Text.literal("PNG превью"), button -> downloadFirst("preview_png"))
-            .dimensions(right, exportY, columnWidth, 20).build());
+            .exportAction().dimensions(right, exportY, columnWidth, 20).build());
         materialsButton = addDrawableChild(MapKlussButton.builder(Text.literal("Материалы"), button -> downloadFirst("materials_txt", "materials_csv"))
-            .dimensions(right, exportY + 24, columnWidth, 20).build());
+            .exportAction().dimensions(right, exportY + 24, columnWidth, 20).build());
         commandsButton = addDrawableChild(MapKlussButton.builder(Text.literal("Команды"), button -> downloadFirst("frame_commands"))
-            .dimensions(right, exportY + 48, columnWidth, 20).build());
+            .exportAction().dimensions(right, exportY + 48, columnWidth, 20).build());
         datapackButton = addDrawableChild(MapKlussButton.builder(Text.literal("Датапак"), button -> downloadFirst("frame_datapack"))
-            .dimensions(right, exportY + 72, columnWidth, 20).build());
+            .exportAction().dimensions(right, exportY + 72, columnWidth, 20).build());
 
         autoFrameButton = addDrawableChild(MapKlussButton.builder(Text.literal("Для рамок"), button -> prepareAutoFrame())
             .gold().dimensions(left, archiveY, columnWidth, 20).build());
         mapDatButton = addDrawableChild(MapKlussButton.builder(Text.literal("Импорт MapDat"), button -> importMapDat())
             .dimensions(left, archiveY + 24, columnWidth, 20).build());
         downloadMapDatButton = addDrawableChild(MapKlussButton.builder(Text.literal("Скачать MapDat"), button -> downloadFirst("mapdat_zip"))
-            .dimensions(left, archiveY + 48, columnWidth, 20).build());
+            .exportAction().dimensions(left, archiveY + 48, columnWidth, 20).build());
         projectButton = addDrawableChild(MapKlussButton.builder(Text.literal("Скачать проект"), button -> downloadFirst("project"))
-            .dimensions(left, archiveY + 72, columnWidth, 20).build());
+            .exportAction().dimensions(left, archiveY + 72, columnWidth, 20).build());
         suppressionButton = addDrawableChild(MapKlussButton.builder(Text.literal("Two-layer"), button -> openSuppression())
-            .gold().dimensions(right, archiveY, columnWidth, 20).build());
+            .special().dimensions(right, archiveY, columnWidth, 20).build());
     }
 
     private boolean sidePreviewLayout() {
@@ -726,16 +726,17 @@ public final class CompanionArtScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        MapKlussUi.drawBackdrop(context, width, height);
         int panelWidth = controlsWidth();
         int left = controlsLeft(panelWidth);
         int titleY = titleRowY();
         int panelBottom = MapKlussUi.panelBottom(height);
         if (sidePreviewLayout()) {
-            MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 12, panelBottom);
+            MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 46, panelBottom);
             if (detailVisible()) MapKlussUi.drawSectionAt(context, textRenderer, "Детали", left, panelWidth, DETAIL_TOP, DETAIL_HEIGHT);
             MapKlussUi.drawSectionAt(context, textRenderer, null, left, panelWidth, titleY - 14, 62);
         } else {
-            MapKlussUi.drawPanel(context, width, PANEL_WIDTH + 28, 12, panelBottom);
+            MapKlussUi.drawPanel(context, width, PANEL_WIDTH + 28, 46, panelBottom);
             if (detailVisible()) MapKlussUi.drawSection(context, textRenderer, "Детали", width, SECTION_WIDTH, DETAIL_TOP, DETAIL_HEIGHT);
             MapKlussUi.drawSection(context, textRenderer, null, width, SECTION_WIDTH, titleY - 14, 36);
         }
@@ -751,22 +752,17 @@ public final class CompanionArtScreen extends Screen {
             }
             drawActionGroups(context, left, panelWidth);
         }
-        String name = manifest == null ? fallbackTitle : manifest.title();
-        if (sidePreviewLayout()) {
-            int centerX = left + panelWidth / 2;
-            context.drawCenteredTextWithShadow(textRenderer, MapKlussUi.clippedText(textRenderer, name, panelWidth - 12), centerX, 18, MapKlussUi.WHITE);
-            MapKlussUi.drawWrappedCenteredIn(context, textRenderer, status, centerX, 35, panelWidth - 12, 2, MapKlussUi.statusColor(status));
-        } else {
-            MapKlussUi.drawHeader(context, textRenderer, name, "", width, 18);
-            MapKlussUi.drawStatusIn(context, textRenderer, status, left + panelWidth / 2, 34, panelWidth - 12);
-        }
+        MapKlussUi.drawStatusIn(context, textRenderer, status, left + panelWidth / 2, 42, panelWidth - 12);
         MapKlussUi.drawFieldLabel(context, textRenderer, "Название арта", left, titleY, panelWidth);
         if (sidePreviewLayout()) {
             int previewX = previewLeft(panelWidth);
-            int previewY = 30;
+            int previewY = 56;
             int previewWidth = Math.max(80, width - previewX - SIDE_MARGIN);
-            int previewHeight = Math.max(60, panelBottom - previewY - 10);
-            MapKlussUi.drawPanelAt(context, previewX - 10, previewX + previewWidth + 10, 12, panelBottom);
+            int dataTop = Math.max(previewY + 48, panelBottom - 31);
+            int previewHeight = Math.max(40, dataTop - previewY - 6);
+            MapKlussUi.drawPanelAt(context, previewX - 10, previewX + previewWidth + 10, 46, panelBottom);
+            MapKlussUi.drawPreviewWell(context, previewX, previewY, previewX + previewWidth, previewY + previewHeight);
+            MapKlussUi.drawDataStrip(context, previewX, previewX + previewWidth, dataTop, panelBottom - 9);
             if (manifest != null) {
                 if (detailVisible()) {
                     int textX = left + 8;
@@ -776,9 +772,18 @@ public final class CompanionArtScreen extends Screen {
                     MapKlussUi.drawLeft(context, textRenderer, artifactFilesLine(), textX, 108, textWidth, MapKlussUi.ACCENT);
                     MapKlussUi.drawLeft(context, textRenderer, artifactUpdatedLine(), textX, 122, textWidth, MapKlussUi.MUTED);
                 }
-                drawPreview(context, previewX, previewY, previewWidth, previewHeight, false);
+                drawPreview(context, previewX + 5, previewY + 5, Math.max(1, previewWidth - 10), Math.max(1, previewHeight - 10), false);
+                MapKlussUi.drawLeft(
+                    context,
+                    textRenderer,
+                    manifest.grid().wide() + "x" + manifest.grid().tall() + "  •  " + modeLabel(manifest.mode()) + "  •  " + privacyLabel(manifest.privacy()),
+                    previewX + 14,
+                    dataTop + 7,
+                    Math.max(30, previewWidth - 24),
+                    MapKlussUi.CYAN
+                );
             } else {
-                drawPreviewPlaceholder(context, previewX, previewY, previewWidth, previewHeight, "Загрузка превью", "Облако готовит изображение арта", MapKlussUi.MUTED);
+                drawPreviewPlaceholder(context, previewX + 5, previewY + 5, Math.max(1, previewWidth - 10), Math.max(1, previewHeight - 10), "Загрузка превью", "Облако готовит изображение арта", MapKlussUi.MUTED);
             }
         } else if (manifest != null && detailVisible()) {
                 drawPreview(context, left + 8, DETAIL_TOP + 17, 74, 50, true);
@@ -789,6 +794,8 @@ public final class CompanionArtScreen extends Screen {
                 MapKlussUi.drawLeft(context, textRenderer, artifactFilesLine(), textX, 98, textWidth, MapKlussUi.ACCENT);
                 MapKlussUi.drawLeft(context, textRenderer, artifactUpdatedLine(), textX, 112, textWidth, MapKlussUi.MUTED);
         }
+        String name = manifest == null ? fallbackTitle : manifest.title();
+        MapKlussUi.drawHeader(context, textRenderer, sidePreviewLayout() ? "Библиотека / " + name : name, "", width, 18);
         super.render(context, mouseX, mouseY, delta);
     }
 
@@ -816,8 +823,7 @@ public final class CompanionArtScreen extends Screen {
 
     private void drawPreview(DrawContext context, int x, int y, int boxWidth, int boxHeight, boolean framed) {
         if (framed) {
-            context.fill(x - 1, y - 1, x + boxWidth + 1, y + boxHeight + 1, 0xAA000000);
-            context.fill(x, y, x + boxWidth, y + boxHeight, 0xFF050509);
+            MapKlussUi.drawPreviewWell(context, x - 3, y - 3, x + boxWidth + 3, y + boxHeight + 3);
         }
         CompanionPreviewTextures.PreviewTexture preview = CompanionPreviewTextures.request(manifest);
         if (preview.ready()) {
@@ -861,9 +867,7 @@ public final class CompanionArtScreen extends Screen {
         int cardHeight = 52;
         int cardLeft = x + Math.max(0, (boxWidth - cardWidth) / 2);
         int cardTop = y + Math.max(0, (boxHeight - cardHeight) / 2);
-        context.fill(cardLeft, cardTop, cardLeft + cardWidth, cardTop + cardHeight, 0x50101018);
-        context.fill(cardLeft, cardTop, cardLeft + cardWidth, cardTop + 1, 0x6650505D);
-        context.fill(cardLeft, cardTop + cardHeight - 1, cardLeft + cardWidth, cardTop + cardHeight, 0x6650505D);
+        MapKlussUi.drawPreviewWell(context, cardLeft, cardTop, cardLeft + cardWidth, cardTop + cardHeight);
         MapKlussUi.drawCenteredIn(context, textRenderer, title, cardLeft + cardWidth / 2, cardTop + 11, cardWidth - 14, color);
         MapKlussUi.drawCenteredIn(context, textRenderer, detail, cardLeft + cardWidth / 2, cardTop + 28, cardWidth - 14, MapKlussUi.DIM);
     }
@@ -1147,7 +1151,12 @@ public final class CompanionArtScreen extends Screen {
 
         for (String collectionId : touchedCollectionIds) {
             boolean selected = updated.collectionIds().contains(collectionId);
-            runtime.libraryCache().updateCollectionItems(userId, collectionId, item, selected);
+            boolean previouslySelected = previous == null
+                ? selected
+                : previous.collectionIds().contains(collectionId);
+            runtime.libraryCache().setCollectionItemState(
+                userId, collectionId, item, previouslySelected, selected
+            );
         }
     }
 
@@ -1172,25 +1181,9 @@ public final class CompanionArtScreen extends Screen {
         runtime.libraryCache().removeViewItem(userId, "recent", deleting.artId());
         runtime.libraryCache().removeViewItem(userId, "favorites", deleting.artId());
         for (String collectionId : deleting.collectionIds()) {
-            runtime.libraryCache().updateCollectionItems(userId, collectionId, toLibraryItem(deleting), false);
-        }
-
-        List<CompanionCollection> currentCollections = new ArrayList<>(runtime.libraryCache().readCollections(userId).items());
-        if (!currentCollections.isEmpty()) {
-            List<CompanionCollection> updatedCollections = new ArrayList<>();
-            for (CompanionCollection collection : currentCollections) {
-                int nextCount = deleting.collectionIds().contains(collection.id())
-                    ? Math.max(0, collection.itemCount() - 1)
-                    : collection.itemCount();
-                updatedCollections.add(new CompanionCollection(
-                    collection.id(),
-                    collection.name(),
-                    collection.createdAt(),
-                    collection.updatedAt(),
-                    nextCount
-                ));
-            }
-            runtime.libraryCache().writeCollections(userId, updatedCollections);
+            runtime.libraryCache().setCollectionItemState(
+                userId, collectionId, toLibraryItem(deleting), true, false
+            );
         }
 
         try {

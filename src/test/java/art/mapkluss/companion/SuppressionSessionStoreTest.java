@@ -115,6 +115,33 @@ final class SuppressionSessionStoreTest {
     }
 
     @Test
+    void validatesStageSpecificProgressAgainstPlan() throws Exception {
+        SuppressionPlan plan = SuppressionBundleReader.read(SuppressionTestFixtures.zipBytes(), "fixture.zip").parsed().plan();
+        SuppressionSessionStore.StoredSession base = session(SuppressionStage.REMOVE, 0, 0, false);
+        SuppressionSessionStore.validateForPlan(base, plan, SuppressionStage.REMOVE);
+
+        assertThrows(java.io.IOException.class, () -> SuppressionSessionStore.validateForPlan(
+            session(SuppressionStage.REMOVE, 64, 0, false), plan, SuppressionStage.REMOVE));
+        assertThrows(java.io.IOException.class, () -> SuppressionSessionStore.validateForPlan(
+            session(SuppressionStage.MOVE, 0, plan.phases().getFirst().standPoints().size(), false), plan, SuppressionStage.MOVE));
+        assertThrows(java.io.IOException.class, () -> SuppressionSessionStore.validateForPlan(
+            session(SuppressionStage.COMPLETE, 62, plan.phases().get(62).standPoints().size(), false), plan, SuppressionStage.COMPLETE));
+    }
+
+    private SuppressionSessionStore.StoredSession session(
+        SuppressionStage stage, int phaseIndex, int standPointIndex, boolean manualOverride
+    ) {
+        return new SuppressionSessionStore.StoredSession(
+            4,
+            tempDir.resolve("plan.json").toString(),
+            tempDir.resolve("plan.litematic").toString(),
+            "a".repeat(64), "b".repeat(64), "art", "version", "Title", stage,
+            10, 64, -30, "c".repeat(64), "minecraft:overworld", 42,
+            phaseIndex, standPointIndex, 0, manualOverride, 123L
+        );
+    }
+
+    @Test
     void clearRemovesOnlyTheStoredSession() throws Exception {
         SuppressionSessionStore store = SuppressionSessionStore.forRunDir(tempDir);
         Path unrelated = tempDir.resolve("keep-me.txt");

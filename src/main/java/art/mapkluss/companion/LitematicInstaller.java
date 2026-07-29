@@ -14,6 +14,9 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 public final class LitematicInstaller {
+    private static final int MAX_TILE_ENTRIES = 256;
+    private static final int MAX_TILE_BYTES = 64 * 1024 * 1024;
+    private static final long MAX_EXPANDED_ZIP_BYTES = 128L * 1024 * 1024;
     private final Path schematicDir;
     private final InstalledArtifactIndex index;
 
@@ -62,36 +65,47 @@ public final class LitematicInstaller {
         }
 
         Files.createDirectories(schematicDir);
-        List<InstalledArtifact> installed = new ArrayList<>();
+        List<TilePayload> payloads = new ArrayList<>();
+        long expandedBytes = 0L;
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
             ZipEntry entry;
             int indexInZip = 1;
             while ((entry = zip.getNextEntry()) != null) {
                 if (entry.isDirectory()) continue;
+                if (indexInZip > MAX_TILE_ENTRIES) throw new IOException("Litematic tile ZIP has too many files");
                 String entryName = entry.getName();
                 if (entryName == null || !entryName.toLowerCase(java.util.Locale.ROOT).endsWith(".litematic")) continue;
-                byte[] tileBytes = zip.readAllBytes();
+                byte[] tileBytes = CompanionApiClient.readBounded(zip, MAX_TILE_BYTES);
+                expandedBytes += tileBytes.length;
+                if (expandedBytes > MAX_EXPANDED_ZIP_BYTES) {
+                    throw new IOException("Litematic tile ZIP expands beyond the safe limit");
+                }
                 validateLitematic(tileBytes, entryName);
                 String tileSha = sha256(tileBytes);
                 String tileArtifactId = artifact.id() + "#" + indexInZip;
-                Path target = chooseTileTargetPath(manifest, entryName, tileSha, indexInZip);
-                Files.write(target, tileBytes);
+                payloads.add(new TilePayload(entryName, tileSha, tileArtifactId, tileBytes, indexInZip));
+                indexInZip++;
+            }
+        }
+
+        if (payloads.isEmpty()) {
+            throw new IOException("Litematic tile ZIP has no .litematic files: " + artifact.filename());
+        }
+
+        List<InstalledArtifact> installed = new ArrayList<>();
+        for (TilePayload payload : payloads) {
+                Path target = chooseTileTargetPath(manifest, payload.entryName(), payload.sha256(), payload.indexInZip());
+                AtomicFiles.write(target, payload.bytes(), false);
                 InstalledArtifact tile = new InstalledArtifact(
                     manifest.artId(),
-                    tileArtifactId,
-                    tileSha,
+                    payload.artifactId(),
+                    payload.sha256(),
                     target.toAbsolutePath().toString(),
                     target.getFileName().toString(),
                     System.currentTimeMillis()
                 );
                 index.upsert(tile);
                 installed.add(tile);
-                indexInZip++;
-            }
-        }
-
-        if (installed.isEmpty()) {
-            throw new IOException("Litematic tile ZIP has no .litematic files: " + artifact.filename());
         }
         index.save();
         return installed;
@@ -246,5 +260,8 @@ public final class LitematicInstaller {
             if (e.getMessage() != null && e.getMessage().contains(filename)) throw e;
             throw new IOException("Downloaded litematic is invalid: " + filename, e);
         }
+    }
+
+    private record TilePayload(String entryName, String sha256, String artifactId, byte[] bytes, int indexInZip) {
     }
 }

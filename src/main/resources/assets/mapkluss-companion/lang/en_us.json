@@ -2,5 +2,6 @@
   "category.mapkluss-companion": "MapKluss Companion",
   "key.category.mapkluss-companion.main": "MapKluss Companion",
   "key.mapkluss-companion.open": "Open MapKluss Companion",
-  "key.mapkluss-companion.autoframe": "Smart map placement in frames"
+  "key.mapkluss-companion.autoframe": "Smart map placement in frames",
+  "button.mapkluss-companion.recognize_maps": "Identify maps"
 }

@@ -18,6 +18,7 @@ final class SuppressionNbt {
     private static final int MAX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
     private static final int MAX_DEPTH = 64;
     private static final int MAX_TAGS = 1_000_000;
+    private static final int MAX_LIST_LENGTH = 1_000_000;
 
     private SuppressionNbt() { }
 
@@ -178,6 +179,9 @@ final class SuppressionNbt {
                     int elementType = input.readUnsignedByte();
                     int length = safeLength(input.readInt(), 1, "list");
                     if (elementType == 0 && length != 0) throw new IOException("Non-empty NBT list uses END elements");
+                    if (length > MAX_LIST_LENGTH || (long) tags + length > MAX_TAGS) {
+                        throw new IOException("NBT list exceeds the safe tag limit");
+                    }
                     List<Tag> values = new ArrayList<>(length);
                     for (int index = 0; index < length; index++) values.add(readPayload(elementType, depth + 1));
                     yield new Tag(type, new NbtList(elementType, values));

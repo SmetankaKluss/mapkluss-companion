@@ -27,8 +27,11 @@ Companion connects to MapKluss services for actions initiated by the player or r
 - build-tracker synchronization;
 - Lens sessions, presence, revisions, previews, and Realtime wakeups while Lens is active;
 - gateway readiness checks with direct service fallback.
+- one bounded request to the public GitHub Releases API during startup to check whether a newer Companion version exists.
 
 Lens performs no background network or disk work while it is inactive. Active Lens sessions use a bounded heartbeat, Realtime-first updates, and a slower recovery poll.
+
+The update check sends no MapKluss account, art, world, server, inventory, or gameplay data. GitHub receives the ordinary network metadata of an HTTPS request. The last release notice shown is stored locally so the same popup is not repeated.
 
 ## Data that remains local
 

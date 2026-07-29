@@ -12,6 +12,7 @@ public final class SuppressionBundleInstaller {
         if (bundle == null || bundle.parsed() == null || bundle.parsed().plan().version() < 3) {
             throw new IOException("Этот старый Two-layer план нельзя запускать. Экспортируйте новый ZIP версии 3 на сайте");
         }
+        SuppressionReferenceLitematic.validateSource(bundle.parsed().plan(), bundle.litematicBytes());
         Path root = runDir.resolve("config").resolve("mapkluss-companion").resolve("suppression");
         Path plans = root.resolve("plans");
         Path schematics = LitematicaPaths.defaultSchematicDir(runDir);

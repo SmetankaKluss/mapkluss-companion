@@ -15,14 +15,23 @@ public final class AutoFrameBridge {
 
     public static void register(AutoFrameManager manager) {
         KeyMapping.Category category = KeyMapping.Category.register(Identifier.fromNamespaceAndPath(MapKlussCompanionClient.MOD_ID, "main"));
-        KeyMapping key = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+        KeyMapping openMenuKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+            "key.mapkluss-companion.open",
+            InputConstants.Type.KEYSYM,
+            GLFW.GLFW_KEY_K,
+            category
+        ));
+        KeyMapping autoFrameKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
             "key.mapkluss-companion.autoframe",
             InputConstants.Type.KEYSYM,
             GLFW.GLFW_KEY_O,
             category
         ));
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            while (key.consumeClick()) manager.activateTargetWall(client);
+            while (openMenuKey.consumeClick()) {
+                if (client.gui.screen() == null) client.gui.setScreen(new CompanionLibraryScreen(null));
+            }
+            while (autoFrameKey.consumeClick()) manager.activateTargetWall(client);
             manager.tick(client);
             MapStackManager.instance().tick(client);
         });

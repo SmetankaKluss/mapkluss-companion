@@ -13,13 +13,16 @@ Client-side Fabric companion for [MapKluss](https://mapkluss.art): cloud art lib
 ### Возможности
 
 - вход в аккаунт MapKluss через безопасное подтверждение устройства;
+- полностью обновлённый интерфейс с переназначаемой клавишей открытия;
 - просмотр облачных артов, версий, коллекций и файлов прямо в Minecraft;
 - установка совместимых Litematic-файлов без ручного поиска загрузок;
-- Lens — клиентское отображение актуального арта поверх рамок;
-- AutoFrame и точное распознавание частей многостраничного арта;
+- Lens — клиентское отображение актуального арта на рамках стен, пола и потолка;
+- AutoFrame на любой плоскости и точное распознавание частей многостраничного арта;
+- отдельная кнопка распознавания и нумерации карт во всех открытых слотах;
 - локальное сохранение превью, привязок и прогресса;
 - Two-layer Builder для артов `1×1` и больших bundle-архивов с выбором части;
-- скан карты и трекер необходимых материалов.
+- скан карт на стенах, полу и потолке, а также трекер необходимых материалов;
+- ненавязчивое уведомление о новых версиях со ссылками на официальный сайт и Telegram.
 
 ### Поддерживаемые версии
 
@@ -58,13 +61,16 @@ done
 ### Features
 
 - secure MapKluss device authorization;
+- a redesigned interface with a rebindable menu key;
 - cloud arts, revisions, collections, and files inside Minecraft;
 - installation of compatible Litematic files;
-- Lens client-side previews over item frames;
-- AutoFrame and exact multi-tile map recognition;
+- Lens client-side previews on wall, floor, and ceiling item frames;
+- AutoFrame on every frame plane and exact multi-tile map recognition;
+- one-click map identification and numbering across every open inventory slot;
 - local preview, binding, and progress persistence;
 - guided Two-layer Builder for `1×1` and multi-map bundles with tile selection;
-- map scanning and material build tracking.
+- wall, floor, and ceiling map scanning plus material build tracking;
+- a non-intrusive new-version notice linking to the official site and Telegram.
 
 ### Requirements
 
@@ -74,7 +80,7 @@ Use the commands in the Russian build section to build all targets. The same mat
 
 ## Privacy and network access
 
-Companion is client-only. Account, Cloud, scan, and Lens actions communicate with MapKluss services only when their respective features are used. Two-layer coordinates, map bindings, cached previews, and local progress remain on the player's device. See [PRIVACY.md](PRIVACY.md) for the complete summary.
+Companion is client-only. Account, Cloud, scan, and Lens actions communicate with MapKluss services only when their respective features are used. A bounded startup request checks the public GitHub Releases API for a newer version. Two-layer coordinates, map bindings, cached previews, and local progress remain on the player's device. See [PRIVACY.md](PRIVACY.md) for the complete summary.
 
 ## Support and security
 

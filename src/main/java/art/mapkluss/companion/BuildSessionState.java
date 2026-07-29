@@ -67,6 +67,13 @@ public record BuildSessionState(
         return new BuildSessionState(id, map_grid, image_preview, materials, next, safeMap(placed), mode, info, art_id, art_version_id);
     }
 
+    public BuildSessionState withMode(String nextMode) {
+        if (!("gathering".equals(nextMode) || "building".equals(nextMode)) || nextMode.equals(mode)) return this;
+        return new BuildSessionState(
+            id, map_grid, image_preview, materials, safeMap(gathered), safeMap(placed), nextMode, info, art_id, art_version_id
+        );
+    }
+
     private static Map<String, Integer> safeMap(Map<String, Integer> source) {
         return source == null ? new HashMap<>() : new HashMap<>(source);
     }

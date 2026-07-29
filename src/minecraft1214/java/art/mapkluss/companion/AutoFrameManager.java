@@ -33,7 +33,7 @@ import java.util.concurrent.CompletableFuture;
 
 public final class AutoFrameManager {
     private static final AutoFrameManager INSTANCE = new AutoFrameManager();
-    private static final int ACTION_TIMEOUT_TICKS = 30;
+    private static final int ACTION_TIMEOUT_TICKS = 100;
 
     private AutoFrameTemplateStore store;
     private AutoFrameMapRegistry mapRegistry;
@@ -52,6 +52,9 @@ public final class AutoFrameManager {
 
     public synchronized CompletableFuture<AutoFrameTemplate> prepare(CompanionManifest manifest) {
         MinecraftClient client = MinecraftClient.getInstance();
+        if (action != null) restoreInventory(client, action);
+        placement = null;
+        action = null;
         return CompletableFuture.supplyAsync(() -> {
             try {
                 if (manifest == null || manifest.grid() == null) throw new IOException("У арта нет размера сетки.");
@@ -75,8 +78,6 @@ public final class AutoFrameManager {
                     templates.upsert(template);
                     templates.setActive(template);
                     templates.save();
-                    placement = null;
-                    action = null;
                     setStatus("AutoFrame подготовлен: " + template.title());
                 }
                 return template;
@@ -107,6 +108,7 @@ public final class AutoFrameManager {
     }
 
     public synchronized void activate(MinecraftClient client, AutoFrameTemplate template) throws IOException {
+        if (action != null) restoreInventory(client, action);
         AutoFrameTemplateStore templates = store(client);
         templates.setActive(template);
         templates.save();
@@ -115,7 +117,8 @@ public final class AutoFrameManager {
         setStatus("Выбран арт: " + template.title());
     }
 
-    public synchronized void stopPlacement() {
+    public synchronized void stopPlacement(MinecraftClient client) {
+        if (action != null) restoreInventory(client, action);
         placement = null;
         action = null;
         setStatus("Размещение AutoFrame остановлено");
@@ -128,16 +131,17 @@ public final class AutoFrameManager {
     public synchronized void activateTargetWall(MinecraftClient client) {
         if (client.currentScreen != null) return;
         if (client.player == null || client.world == null) {
-            setStatus("Откройте мир и смотрите на левую нижнюю рамку");
-            return;
-        }
-        if (action != null) {
-            setStatus("Дождитесь завершения установки карты");
+            setStatus("Откройте мир и наведитесь на начальную рамку сетки");
             return;
         }
         ItemStack hand = client.player.getMainHandStack();
         if (!hand.isOf(Items.FILLED_MAP)) {
-            setStatus("Возьмите в основную руку часть нужного арта");
+            if (placement != null || action != null) stopPlacement(client);
+            else setStatus("Возьмите в основную руку часть нужного арта");
+            return;
+        }
+        if (action != null) {
+            setStatus("Дождитесь завершения установки карты");
             return;
         }
         Optional<MapArtLayoutSolver.Tile> handTile = MapArtTiles.fromStack(client, hand);
@@ -147,22 +151,47 @@ public final class AutoFrameManager {
         }
         Optional<ItemFrameEntity> target = targetFrame(client);
         if (target.isEmpty()) {
-            if (placement != null) stopPlacement();
-            else setStatus("Смотрите на левую нижнюю рамку и нажмите клавишу AutoFrame");
+            if (placement != null) stopPlacement(client);
+            else setStatus("Наведитесь на рамку снизу слева; на полу — на ближнюю слева");
             return;
         }
 
         ItemFrameEntity frame = target.get();
         List<MapArtLayoutSolver.Tile> inventoryTiles = inventoryTiles(client);
-        KnownSelection known = knownTemplateForHeldMap(client, inventoryTiles, handTile.get());
+        int tileCount = MapArtTiles.uniqueByMapId(inventoryTiles).size();
+        FrameGridResolver.DimensionResolution dimensions = inferFrameDimensions(client, frame, tileCount);
+        KnownSelection known = knownTemplateForHeldMap(
+            client,
+            inventoryTiles,
+            handTile.get(),
+            dimensions.found() ? dimensions.dimensions() : null
+        );
         if (known.ambiguous()) return;
         Optional<AutoFrameTemplate> selected = known.template();
-        if (selected.isEmpty()) selected = inferLocalTemplate(client, inventoryTiles, null);
+        if (selected.isEmpty()) {
+            if (!dimensions.found()) {
+                setStatus(dimensions.status() == FrameGridResolver.Status.AMBIGUOUS
+                    ? "Размер сетки неоднозначен. Наведитесь на её ближнюю левую рамку"
+                    : "Не найдена полная сетка из " + tileCount + " рамок впереди и справа от курсора");
+                return;
+            }
+            selected = inferLocalTemplate(client, inventoryTiles, null, dimensions.dimensions());
+        }
         if (selected.isEmpty()) return;
 
         rememberMapMappings(client, selected.get(), inventoryTiles);
 
-        placement = placement(selected.get(), frame, client);
+        AutoFramePlacement.PlacementResolution resolved = placement(selected.get(), frame, client);
+        if (!resolved.found()) {
+            placement = null;
+            action = null;
+            setStatus(
+                "Не найдена полная сетка " + selected.get().wide() + "x" + selected.get().tall()
+                    + " впереди и справа от курсора"
+            );
+            return;
+        }
+        placement = resolved.placement();
         action = null;
         setStatus("AutoFrame закреплён. Нажимайте ПКМ по рамкам в любом порядке");
     }
@@ -172,7 +201,7 @@ public final class AutoFrameManager {
         if (client.player.isSneaking() || client.currentScreen != null) return false;
         if (client.crosshairTarget == null || client.crosshairTarget.getType() != HitResult.Type.ENTITY) return false;
         Entity target = ((EntityHitResult) client.crosshairTarget).getEntity();
-        if (!(target instanceof ItemFrameEntity frame) || frame.getHorizontalFacing().getAxis().isVertical()) return false;
+        if (!(target instanceof ItemFrameEntity frame)) return false;
         if (action != null) {
             setStatus("Дождитесь завершения установки карты");
             return true;
@@ -187,9 +216,22 @@ public final class AutoFrameManager {
     private boolean interceptPlacementCell(MinecraftClient client, ItemFrameEntity frame, AutoFramePlacement.Cell cell) {
         ItemStack held = frame.getHeldItemStack();
         if (!held.isEmpty()) {
-            setStatus(matchesCell(client, held, placement.template(), cell)
-                ? "Эта рамка уже заполнена правильной картой"
-                : "Рамка занята другим предметом");
+            if (!matchesCell(client, held, placement.template(), cell)) {
+                setStatus("Рамка занята другим предметом");
+                return true;
+            }
+            if (matchesRotation(frame, cell)) {
+                setStatus("Эта рамка уже заполнена правильной картой");
+                return true;
+            }
+            action = PlacementAction.rotationOnly(
+                frame.getId(),
+                frame.getAttachedBlockPos(),
+                frame.getHorizontalFacing(),
+                placement.template(),
+                cell
+            );
+            setStatus("Поворачиваю часть " + (cell.tileIndex() + 1));
             return true;
         }
 
@@ -201,13 +243,16 @@ public final class AutoFrameManager {
         int selected = client.player.getInventory().selectedSlot;
         AutoFrameInventoryPlan plan = AutoFrameInventoryPlan.forInventoryIndex(inventoryIndex, selected);
         ItemStack originalHotbar = client.player.getInventory().getStack(selected).copy();
-        action = new PlacementAction(frame.getId(), frame.getAttachedBlockPos(), frame.getHorizontalFacing(), cell, plan, originalHotbar);
+        action = new PlacementAction(
+            frame.getId(), frame.getAttachedBlockPos(), frame.getHorizontalFacing(), placement.template(), cell, plan, originalHotbar
+        );
         setStatus("Ставлю часть " + (cell.tileIndex() + 1) + "/" + placement.template().tileHashes().size());
         return true;
     }
 
     public synchronized void tick(MinecraftClient client) {
         if (client.world != activeWorld) {
+            if (action != null) restoreInventory(client, action);
             activeWorld = client.world;
             placement = null;
             action = null;
@@ -242,9 +287,15 @@ public final class AutoFrameManager {
         switch (action.phase) {
             case PREPARE -> {
                 if (action.plan.swapRequired()) {
+                    int sourceScreenSlot = playerScreenSlot(client, action.plan.sourceInventoryIndex());
+                    if (sourceScreenSlot < 0) {
+                        action = null;
+                        setStatus("Не удалось найти слот карты в открытом интерфейсе");
+                        return;
+                    }
                     client.interactionManager.clickSlot(
                         client.player.currentScreenHandler.syncId,
-                        action.plan.sourceScreenSlot(),
+                        sourceScreenSlot,
                         action.plan.targetHotbarIndex(),
                         SlotActionType.SWAP,
                         client.player
@@ -253,8 +304,8 @@ public final class AutoFrameManager {
                 } else if (action.plan.selectionChangeRequired()) {
                     client.player.getInventory().setSelectedSlot(action.plan.targetHotbarIndex());
                 }
-                action.phase = Phase.WAIT_FOR_MAP;
-                action.waitTicks = 2;
+                action.advance(Phase.WAIT_FOR_MAP);
+                action.waitTicks = 0;
             }
             case WAIT_FOR_MAP -> {
                 if (!matchesCell(client, client.player.getMainHandStack(), placement.template(), action.cell)) return;
@@ -265,32 +316,74 @@ public final class AutoFrameManager {
                     return;
                 }
                 client.interactionManager.interactEntity(client.player, frame, Hand.MAIN_HAND);
-                action.phase = Phase.WAIT_FOR_FRAME;
-                action.waitTicks = 2;
+                action.advance(Phase.WAIT_FOR_FRAME);
+                action.waitTicks = 0;
             }
             case WAIT_FOR_FRAME -> {
                 if (!matchesCell(client, frame.getHeldItemStack(), placement.template(), action.cell)) return;
-                restoreInventory(client, action);
-                int tileNumber = action.cell.tileIndex() + 1;
-                action = null;
-                setStatus("Установлена часть " + tileNumber);
+                if (!matchesRotation(frame, action.cell)) {
+                    action.advance(Phase.ROTATE_FRAME);
+                    action.rotationClickPending = false;
+                    action.lastObservedRotation = normalizedRotation(frame);
+                    return;
+                }
+                finishPlacement(client);
+            }
+            case ROTATE_FRAME -> {
+                if (!matchesCell(client, frame.getHeldItemStack(), placement.template(), action.cell)) {
+                    restoreInventory(client, action);
+                    action = null;
+                    setStatus("Карта в рамке изменилась, поворот отменён");
+                    return;
+                }
+                int currentRotation = normalizedRotation(frame);
+                if (currentRotation == action.cell.mapRotation()) {
+                    finishPlacement(client);
+                    return;
+                }
+                if (currentRotation != action.lastObservedRotation) {
+                    action.lastObservedRotation = currentRotation;
+                    action.rotationClickPending = false;
+                }
+                if (action.rotationClickPending) return;
+                client.interactionManager.interactEntity(client.player, frame, Hand.MAIN_HAND);
+                action.rotationClickPending = true;
             }
         }
     }
 
+    private void finishPlacement(MinecraftClient client) {
+        if (action == null) return;
+        restoreInventory(client, action);
+        int tileNumber = action.cell.tileIndex() + 1;
+        action = null;
+        setStatus("Установлена часть " + tileNumber);
+    }
+
+    private static int normalizedRotation(ItemFrameEntity frame) {
+        return Math.floorMod(frame.getRotation(), 4);
+    }
+
+    private static boolean matchesRotation(ItemFrameEntity frame, AutoFramePlacement.Cell cell) {
+        return normalizedRotation(frame) == cell.mapRotation();
+    }
+
     private void restoreInventory(MinecraftClient client, PlacementAction current) {
         if (client.player == null || client.interactionManager == null || current.restored) return;
-        current.restored = true;
+        if (current.plan == null) return;
         if (current.swapSent && safeToReverseSwap(client, current)) {
+            int sourceScreenSlot = playerScreenSlot(client, current.plan.sourceInventoryIndex());
+            if (sourceScreenSlot < 0) return;
             client.interactionManager.clickSlot(
                 client.player.currentScreenHandler.syncId,
-                current.plan.sourceScreenSlot(),
+                sourceScreenSlot,
                 current.plan.targetHotbarIndex(),
                 SlotActionType.SWAP,
                 client.player
             );
         }
         client.player.getInventory().setSelectedSlot(current.plan.originalSelectedHotbarIndex());
+        current.restored = true;
     }
 
     private boolean safeToReverseSwap(MinecraftClient client, PlacementAction current) {
@@ -298,8 +391,17 @@ public final class AutoFrameManager {
         ItemStack hotbar = client.player.getInventory().getStack(current.plan.targetHotbarIndex());
         boolean sourceStillOriginalHotbar = ItemStack.areEqual(source, current.originalHotbarStack);
         boolean hotbarStillExpectedMap = hotbar.isEmpty()
-            || (placement != null && matchesCell(client, hotbar, placement.template(), current.cell));
+            || matchesCell(client, hotbar, current.template, current.cell);
         return sourceStillOriginalHotbar && hotbarStillExpectedMap;
+    }
+
+    private static int playerScreenSlot(MinecraftClient client, int inventoryIndex) {
+        if (client.player == null || client.player.currentScreenHandler == null) return -1;
+        return client.player.currentScreenHandler.slots.stream()
+            .filter(slot -> slot.inventory == client.player.getInventory() && slot.getIndex() == inventoryIndex)
+            .mapToInt(slot -> slot.id)
+            .findFirst()
+            .orElse(-1);
     }
 
     public synchronized Snapshot snapshot(MinecraftClient client) {
@@ -385,12 +487,16 @@ public final class AutoFrameManager {
     private KnownSelection knownTemplateForHeldMap(
         MinecraftClient client,
         List<MapArtLayoutSolver.Tile> available,
-        MapArtLayoutSolver.Tile held
+        MapArtLayoutSolver.Tile held,
+        FrameGridResolver.Dimensions dimensions
     ) {
         try {
             AutoFrameTemplateStore templates = store(client);
             List<AutoFrameTemplate> candidates = templates.templates().stream()
                 .filter(template -> template.tileHashes().contains(held.hash()))
+                .filter(template -> dimensions == null
+                    || template.tileHashes().size() != dimensions.cellCount()
+                    || (template.wide() == dimensions.wide() && template.tall() == dimensions.tall()))
                 .sorted(Comparator.comparingInt((AutoFrameTemplate template) -> template.tileHashes().size()).reversed())
                 .toList();
             if (candidates.isEmpty()) return new KnownSelection(Optional.empty(), false);
@@ -477,7 +583,11 @@ public final class AutoFrameManager {
     ) {
         if (tiles.size() != template.tileHashes().size() || tiles.size() > 54) return Map.of();
         try {
-            MapArtLayoutSolver.Layout layout = MapArtLayoutSolver.solveByMapId(MapArtTiles.uniqueByMapId(tiles), null);
+            MapArtLayoutSolver.Layout layout = MapArtLayoutSolver.solveWithDimensions(
+                MapArtTiles.uniqueByMapId(tiles),
+                template.wide(),
+                template.tall()
+            );
             if (!layout.reliable() || !layout.tileHashes().equals(template.tileHashes())) return Map.of();
             Map<Integer, Integer> values = new HashMap<>();
             for (int index = 0; index < layout.tileMapIds().size(); index++) values.put(layout.tileMapIds().get(index), index);
@@ -522,6 +632,15 @@ public final class AutoFrameManager {
         List<MapArtLayoutSolver.Tile> input,
         Integer bottomLeftMapId
     ) {
+        return inferLocalTemplate(client, input, bottomLeftMapId, null);
+    }
+
+    private Optional<AutoFrameTemplate> inferLocalTemplate(
+        MinecraftClient client,
+        List<MapArtLayoutSolver.Tile> input,
+        Integer bottomLeftMapId,
+        FrameGridResolver.Dimensions dimensions
+    ) {
         List<MapArtLayoutSolver.Tile> tiles = MapArtTiles.uniqueByMapId(input);
         if (tiles.isEmpty()) {
             setStatus("В инвентаре или сундуке нет загруженных карт");
@@ -530,7 +649,14 @@ public final class AutoFrameManager {
 
         final MapArtLayoutSolver.Layout layout;
         try {
-            layout = MapArtLayoutSolver.solveByMapId(tiles, bottomLeftMapId);
+            layout = dimensions == null
+                ? MapArtLayoutSolver.solveByMapId(tiles, bottomLeftMapId)
+                : MapArtLayoutSolver.solveByMapIdWithDimensions(
+                    tiles,
+                    bottomLeftMapId,
+                    dimensions.wide(),
+                    dimensions.tall()
+                );
         } catch (IllegalArgumentException error) {
             MapKlussCompanionClient.LOGGER.debug("Could not infer a local map-art layout.", error);
             setStatus("Не удалось восстановить сетку карт");
@@ -566,6 +692,15 @@ public final class AutoFrameManager {
         }
     }
 
+    synchronized Optional<AutoFrameTemplate> inferAndRememberVisibleMaps(
+        MinecraftClient client,
+        List<MapArtLayoutSolver.Tile> tiles
+    ) {
+        Optional<AutoFrameTemplate> inferred = inferLocalTemplate(client, tiles, null);
+        inferred.ifPresent(template -> rememberMapMappings(client, template, tiles));
+        return inferred;
+    }
+
     private List<MapArtLayoutSolver.Tile> inventoryTiles(MinecraftClient client) {
         List<MapArtLayoutSolver.Tile> tiles = new ArrayList<>();
         for (int index = 0; index < 36; index++) {
@@ -577,7 +712,7 @@ public final class AutoFrameManager {
     private Optional<ItemFrameEntity> targetFrame(MinecraftClient client) {
         if (client.crosshairTarget == null || client.crosshairTarget.getType() != HitResult.Type.ENTITY) return Optional.empty();
         Entity entity = ((EntityHitResult) client.crosshairTarget).getEntity();
-        if (!(entity instanceof ItemFrameEntity frame) || frame.getHorizontalFacing().getAxis().isVertical()) return Optional.empty();
+        if (!(entity instanceof ItemFrameEntity frame)) return Optional.empty();
         return Optional.of(frame);
     }
 
@@ -600,7 +735,7 @@ public final class AutoFrameManager {
                     && binding.get().tileIndex() == cell.tileIndex()
                     && (binding.get().tileHash() == null || binding.get().tileHash().equals(cell.expectedHash()))) {
                     String liveHash = mapHash(stack, client);
-                    if (liveHash == null || liveHash.equals(cell.expectedHash())) return index;
+                    if (cell.expectedHash().equals(liveHash)) return index;
                 }
             }
         } catch (IOException error) {
@@ -620,18 +755,7 @@ public final class AutoFrameManager {
     ) {
         String liveHash = mapHash(stack, client);
         if (liveHash != null) return cell.expectedHash().equals(liveHash);
-        Integer mapId = MapArtTiles.mapId(stack);
-        if (mapId == null) return false;
-        try {
-            Optional<AutoFrameMapRegistry.Binding> binding = registry(client).find(connectionKey(client), mapId);
-            return binding.isPresent()
-                && binding.get().artId().equals(template.artId())
-                && binding.get().versionId().equals(template.versionId())
-                && binding.get().tileIndex() == cell.tileIndex()
-                && (binding.get().tileHash() == null || binding.get().tileHash().equals(cell.expectedHash()));
-        } catch (IOException error) {
-            return false;
-        }
+        return false;
     }
 
     private int matchingInventoryCount(MinecraftClient client, AutoFrameTemplate template) {
@@ -660,11 +784,7 @@ public final class AutoFrameManager {
 
     private int correctFrameCount(MinecraftClient client, AutoFramePlacement active) {
         if (client.world == null) return 0;
-        FrameWallGeometry.Coord origin = FrameWallGeometry.fromBlockPos(active.leftBottom(), active.facing());
-        BlockPos opposite = FrameWallGeometry.toBlockPos(
-            active.facing(),
-            FrameWallGeometry.cell(origin, active.template().wide() - 1, active.template().tall() - 1)
-        );
+        BlockPos opposite = active.blockAt(active.template().wide() - 1, active.template().tall() - 1);
         Box bounds = new Box(
             Math.min(active.leftBottom().getX(), opposite.getX()),
             Math.min(active.leftBottom().getY(), opposite.getY()),
@@ -676,14 +796,69 @@ public final class AutoFrameManager {
         int correct = 0;
         for (ItemFrameEntity frame : client.world.getEntitiesByClass(ItemFrameEntity.class, bounds, value -> value.getHorizontalFacing() == active.facing())) {
             Optional<AutoFramePlacement.Cell> cell = active.cellAt(frame.getAttachedBlockPos(), frame.getHorizontalFacing());
-            if (cell.isPresent() && matchesCell(client, frame.getHeldItemStack(), active.template(), cell.get())) correct++;
+            if (cell.isPresent()
+                && matchesCell(client, frame.getHeldItemStack(), active.template(), cell.get())
+                && matchesRotation(frame, cell.get())) {
+                correct++;
+            }
         }
         return correct;
     }
 
-    private AutoFramePlacement placement(AutoFrameTemplate template, ItemFrameEntity frame, MinecraftClient client) {
+    private AutoFramePlacement.PlacementResolution placement(
+        AutoFrameTemplate template,
+        ItemFrameEntity frame,
+        MinecraftClient client
+    ) {
         String worldKey = client.world == null ? "" : client.world.getRegistryKey().getValue().toString();
-        return new AutoFramePlacement(template, frame.getAttachedBlockPos(), frame.getHorizontalFacing(), worldKey);
+        Direction facing = frame.getHorizontalFacing();
+        Direction planeUp = AutoFramePlacement.planeUpFromPlayerView(
+            facing,
+            client.player.getHorizontalFacing()
+        );
+        int radius = Math.max(template.wide(), template.tall()) + 1;
+        return AutoFramePlacement.resolveFromFrames(
+            template,
+            frame.getAttachedBlockPos(),
+            facing,
+            planeUp,
+            worldKey,
+            nearbyFramePositions(client, frame, facing, radius)
+        );
+    }
+
+    private FrameGridResolver.DimensionResolution inferFrameDimensions(
+        MinecraftClient client,
+        ItemFrameEntity frame,
+        int cellCount
+    ) {
+        Direction facing = frame.getHorizontalFacing();
+        Direction planeUp = AutoFramePlacement.planeUpFromPlayerView(
+            facing,
+            client.player.getHorizontalFacing()
+        );
+        return AutoFramePlacement.inferDimensionsFromFrames(
+            frame.getAttachedBlockPos(),
+            facing,
+            planeUp,
+            nearbyFramePositions(client, frame, facing, cellCount + 1),
+            cellCount
+        );
+    }
+
+    private List<BlockPos> nearbyFramePositions(
+        MinecraftClient client,
+        ItemFrameEntity target,
+        Direction facing,
+        int radius
+    ) {
+        if (client.world == null) return List.of();
+        Box bounds = new Box(target.getAttachedBlockPos()).expand(Math.max(2, radius));
+        return client.world.getEntitiesByClass(
+            ItemFrameEntity.class,
+            bounds,
+            value -> value.getHorizontalFacing() == facing
+        ).stream().map(ItemFrameEntity::getAttachedBlockPos).distinct().toList();
     }
 
     private ItemFrameEntity findFrame(MinecraftClient client, int entityId, BlockPos attachedPos, Direction facing) {
@@ -762,13 +937,15 @@ public final class AutoFrameManager {
     private enum Phase {
         PREPARE,
         WAIT_FOR_MAP,
-        WAIT_FOR_FRAME
+        WAIT_FOR_FRAME,
+        ROTATE_FRAME
     }
 
     private static final class PlacementAction {
         private final int entityId;
         private final BlockPos attachedPos;
         private final Direction facing;
+        private final AutoFrameTemplate template;
         private final AutoFramePlacement.Cell cell;
         private final AutoFrameInventoryPlan plan;
         private final ItemStack originalHotbarStack;
@@ -777,11 +954,14 @@ public final class AutoFrameManager {
         private int waitTicks;
         private boolean swapSent;
         private boolean restored;
+        private boolean rotationClickPending;
+        private int lastObservedRotation = -1;
 
         private PlacementAction(
             int entityId,
             BlockPos attachedPos,
             Direction facing,
+            AutoFrameTemplate template,
             AutoFramePlacement.Cell cell,
             AutoFrameInventoryPlan plan,
             ItemStack originalHotbarStack
@@ -789,9 +969,35 @@ public final class AutoFrameManager {
             this.entityId = entityId;
             this.attachedPos = attachedPos;
             this.facing = facing;
+            this.template = template;
             this.cell = cell;
             this.plan = plan;
             this.originalHotbarStack = originalHotbarStack;
+        }
+
+        private static PlacementAction rotationOnly(
+            int entityId,
+            BlockPos attachedPos,
+            Direction facing,
+            AutoFrameTemplate template,
+            AutoFramePlacement.Cell cell
+        ) {
+            PlacementAction action = new PlacementAction(
+                entityId,
+                attachedPos,
+                facing,
+                template,
+                cell,
+                null,
+                ItemStack.EMPTY
+            );
+            action.phase = Phase.ROTATE_FRAME;
+            return action;
+        }
+
+        private void advance(Phase next) {
+            phase = next;
+            ticks = 0;
         }
     }
 }

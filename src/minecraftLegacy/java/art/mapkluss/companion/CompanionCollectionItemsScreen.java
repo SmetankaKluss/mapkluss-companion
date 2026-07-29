@@ -15,8 +15,8 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 public final class CompanionCollectionItemsScreen extends Screen {
-    private static final int PANEL_WIDTH = 500;
-    private static final int SECTION_WIDTH = 500;
+    private static final int PANEL_WIDTH = 1120;
+    private static final int SECTION_WIDTH = 1120;
     private static final int ROWS = 8;
     private static final int LIST_Y = 156;
     private static final int ROW_HEIGHT = 46;
@@ -64,7 +64,7 @@ public final class CompanionCollectionItemsScreen extends Screen {
         nameInput.setChangedListener(value -> nameDraft = value);
         addDrawableChild(nameInput);
         addDrawableChild(MapKlussButton.builder(Text.literal("Сохранить"), button -> saveCollectionName())
-            .dimensions(left + nameWidth + gap, 76, metadataButtonWidth, 20).build());
+            .gold().dimensions(left + nameWidth + gap, 76, metadataButtonWidth, 20).build());
         deleteCollectionButton = addDrawableChild(MapKlussButton.builder(Text.literal(deleteCollectionConfirmation.armed() ? "Подтвердить удаление" : "Удалить"), button -> requestDeleteCollection()).danger()
             .tooltip(CompanionI18n.text("Удалить коллекцию"))
             .navigationOrder(1000)
@@ -85,19 +85,19 @@ public final class CompanionCollectionItemsScreen extends Screen {
         if (sideRailLayout(panelWidth, left)) {
             int railLeft = sideRailLeft(panelWidth, left);
             addDrawableChild(MapKlussButton.builder(Text.literal("Обновить"), button -> loadItems())
-                .dimensions(railLeft, 80, SIDE_RAIL_WIDTH, 20).build());
+                .technical().dimensions(railLeft, 80, SIDE_RAIL_WIDTH, 20).build());
             pageButton = addDrawableChild(MapKlussButton.builder(pageButtonText(), button -> nextPage())
                 .dimensions(railLeft, 106, SIDE_RAIL_WIDTH, 20).build());
             addDrawableChild(MapKlussButton.builder(Text.literal("Сайт коллекции"), button -> openCollectionSite())
-                .dimensions(railLeft, 164, SIDE_RAIL_WIDTH, 20).build());
+                .technical().dimensions(railLeft, 164, SIDE_RAIL_WIDTH, 20).build());
         } else {
             int bottomButtonWidth = Math.max(48, (panelWidth - gap * 2) / 3);
             addDrawableChild(MapKlussButton.builder(Text.literal("Обновить"), button -> loadItems())
-                .dimensions(left, height - 58, bottomButtonWidth, 20).build());
+                .technical().dimensions(left, height - 58, bottomButtonWidth, 20).build());
             pageButton = addDrawableChild(MapKlussButton.builder(pageButtonText(), button -> nextPage())
                 .dimensions(left + bottomButtonWidth + gap, height - 58, bottomButtonWidth, 20).build());
             addDrawableChild(MapKlussButton.builder(Text.literal("Сайт"), button -> openCollectionSite())
-                .dimensions(left + (bottomButtonWidth + gap) * 2, height - 58, panelWidth - (bottomButtonWidth + gap) * 2, 20).build());
+                .technical().dimensions(left + (bottomButtonWidth + gap) * 2, height - 58, panelWidth - (bottomButtonWidth + gap) * 2, 20).build());
         }
         addDrawableChild(MapKlussUi.languageButton(this));
         addDrawableChild(MapKlussUi.backButton(this, parent, left));
@@ -124,19 +124,7 @@ public final class CompanionCollectionItemsScreen extends Screen {
                     collection.updatedAt(),
                     loadedItems.size()
                 );
-                List<CompanionCollection> currentCollections = new ArrayList<>(runtime.libraryCache().readCollections(runtime.sessionStore().userId()).items());
-                List<CompanionCollection> updatedCollections = new ArrayList<>();
-                boolean found = false;
-                for (CompanionCollection existing : currentCollections) {
-                    if (existing.id().equals(refreshedCollection.id())) {
-                        updatedCollections.add(refreshedCollection);
-                        found = true;
-                    } else {
-                        updatedCollections.add(existing);
-                    }
-                }
-                if (!found) updatedCollections.add(0, refreshedCollection);
-                runtime.libraryCache().writeCollections(runtime.sessionStore().userId(), updatedCollections);
+                runtime.libraryCache().upsertCollection(runtime.sessionStore().userId(), refreshedCollection);
                 runOnClient(() -> {
                     collection = refreshedCollection;
                     nameDraft = refreshedCollection.name();
@@ -245,7 +233,8 @@ public final class CompanionCollectionItemsScreen extends Screen {
                 runtime.apiClient().setCollectionItem(collection.id(), item.artId(), false);
                 syncAfterRemoval(runtime, item);
                 runOnClient(() -> {
-                    items.removeIf(existing -> existing.artId().equals(item.artId()));
+                    boolean removed = items.removeIf(existing -> existing.artId().equals(item.artId()));
+                    if (!removed) return;
                     collection = new CompanionCollection(
                         collection.id(),
                         collection.name(),
@@ -306,19 +295,7 @@ public final class CompanionCollectionItemsScreen extends Screen {
                     updated.updatedAt(),
                     collection.itemCount()
                 );
-                List<CompanionCollection> current = new ArrayList<>(runtime.libraryCache().readCollections(runtime.sessionStore().userId()).items());
-                List<CompanionCollection> replaced = new ArrayList<>();
-                boolean found = false;
-                for (CompanionCollection existing : current) {
-                    if (existing.id().equals(updatedWithCount.id())) {
-                        replaced.add(updatedWithCount);
-                        found = true;
-                    } else {
-                        replaced.add(existing);
-                    }
-                }
-                if (!found) replaced.add(0, updatedWithCount);
-                runtime.libraryCache().writeCollections(runtime.sessionStore().userId(), replaced);
+                runtime.libraryCache().upsertCollection(runtime.sessionStore().userId(), updatedWithCount);
                 runOnClient(() -> {
                     collection = updatedWithCount;
                     nameDraft = updatedWithCount.name();
@@ -351,9 +328,7 @@ public final class CompanionCollectionItemsScreen extends Screen {
                     return;
                 }
                 runtime.apiClient().deleteCollection(collection.id());
-                List<CompanionCollection> current = new ArrayList<>(runtime.libraryCache().readCollections(runtime.sessionStore().userId()).items());
-                current.removeIf(existing -> existing.id().equals(collection.id()));
-                runtime.libraryCache().writeCollections(runtime.sessionStore().userId(), current);
+                runtime.libraryCache().removeCollection(runtime.sessionStore().userId(), collection.id());
                 runtime.libraryCache().writeCollectionItems(runtime.sessionStore().userId(), collection.id(), List.of());
                 runOnClient(() -> {
                     if (parent instanceof CompanionCollectionsScreen collectionsScreen) {
@@ -433,24 +408,7 @@ public final class CompanionCollectionItemsScreen extends Screen {
 
     private void syncAfterRemoval(CompanionRuntime runtime, CompanionLibraryItem item) throws Exception {
         String userId = runtime.sessionStore().userId();
-        runtime.libraryCache().updateCollectionItems(userId, collection.id(), item, false);
-
-        List<CompanionCollection> current = new ArrayList<>(runtime.libraryCache().readCollections(userId).items());
-        List<CompanionCollection> updatedCollections = new ArrayList<>();
-        for (CompanionCollection existing : current) {
-            if (existing.id().equals(collection.id())) {
-                updatedCollections.add(new CompanionCollection(
-                    existing.id(),
-                    existing.name(),
-                    existing.createdAt(),
-                    existing.updatedAt(),
-                    Math.max(0, existing.itemCount() - 1)
-                ));
-            } else {
-                updatedCollections.add(existing);
-            }
-        }
-        runtime.libraryCache().writeCollections(userId, updatedCollections);
+        runtime.libraryCache().setCollectionItemState(userId, collection.id(), item, true, false);
 
         Optional<ManifestCache.CachedManifest> cachedManifest = runtime.manifestCache().read(userId, item.artId());
         if (cachedManifest.isPresent()) {
@@ -478,10 +436,11 @@ public final class CompanionCollectionItemsScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        MapKlussUi.drawBackdrop(context, width, height);
         int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
         boolean sideRail = sideRailLayout(panelWidth, left);
-        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 10, MapKlussUi.panelBottom(height));
+        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 46, MapKlussUi.panelBottom(height));
         if (sideRail) {
             int railLeft = sideRailLeft(panelWidth, left);
             MapKlussUi.drawPanelAt(context, railLeft - 8, railLeft + SIDE_RAIL_WIDTH + 8, 46, MapKlussUi.panelBottom(height));
@@ -587,7 +546,7 @@ public final class CompanionCollectionItemsScreen extends Screen {
     }
 
     private boolean sideRailLayout(int panelWidth, int left) {
-        return height >= 360 && MapKlussUi.rightRailFits(width, panelWidth, SIDE_RAIL_WIDTH, SIDE_RAIL_GAP);
+        return false;
     }
 
     private int sideRailLeft(int panelWidth, int left) {
@@ -595,7 +554,7 @@ public final class CompanionCollectionItemsScreen extends Screen {
     }
 
     private int screenLeft(int panelWidth) {
-        return MapKlussUi.leftWithRightRail(width, panelWidth, SIDE_RAIL_WIDTH, SIDE_RAIL_GAP);
+        return MapKlussUi.centeredLeft(width, panelWidth);
     }
 
     private List<CompanionLibraryItem> filteredItems() {

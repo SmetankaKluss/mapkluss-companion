@@ -15,4 +15,11 @@ final class MapFrameCornerTest {
         assertFalse(first.samePlane(new MapFrameCorner(Direction.SOUTH, 10, 4, 5)));
         assertFalse(first.samePlane(new MapFrameCorner(Direction.NORTH, 11, 4, 5)));
     }
+
+    @Test
+    void requiresSameFloorOrCeilingViewBasis() {
+        MapFrameCorner northUp = new MapFrameCorner(Direction.UP, Direction.NORTH, 64, 1, 2);
+        MapFrameCorner eastUp = new MapFrameCorner(Direction.UP, Direction.EAST, 64, 1, 2);
+        assertFalse(northUp.samePlane(eastUp));
+    }
 }

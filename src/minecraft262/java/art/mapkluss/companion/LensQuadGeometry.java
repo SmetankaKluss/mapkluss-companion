@@ -14,9 +14,6 @@ final class LensQuadGeometry {
     }
 
     static Quad quad(BlockPos block, Direction facing) {
-        if (!facing.getAxis().isHorizontal()) {
-            throw new IllegalArgumentException("Lens supports vertical frame walls only");
-        }
         Vec3 center = Vec3.atCenterOf(block).add(
             facing.getStepX() * ART_PLANE_OFFSET,
             facing.getStepY() * ART_PLANE_OFFSET,
@@ -27,9 +24,13 @@ final class LensQuadGeometry {
             case SOUTH -> new Vec3(HALF_CELL, 0, 0);
             case EAST -> new Vec3(0, 0, -HALF_CELL);
             case WEST -> new Vec3(0, 0, HALF_CELL);
-            default -> throw new IllegalArgumentException("Lens supports vertical frame walls only");
+            case UP -> new Vec3(HALF_CELL, 0, 0);
+            case DOWN -> new Vec3(-HALF_CELL, 0, 0);
         };
-        Vec3 up = new Vec3(0, HALF_CELL, 0);
+        Vec3 up = switch (facing) {
+            case NORTH, SOUTH, EAST, WEST -> new Vec3(0, HALF_CELL, 0);
+            case UP, DOWN -> new Vec3(0, 0, -HALF_CELL);
+        };
         return new Quad(
             center.subtract(right).subtract(up),
             center.add(right).subtract(up),

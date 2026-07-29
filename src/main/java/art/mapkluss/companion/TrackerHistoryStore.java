@@ -5,7 +5,6 @@ import com.google.gson.GsonBuilder;
 
 import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -25,11 +24,15 @@ public final class TrackerHistoryStore {
     }
 
     public static TrackerHistoryStore load(Path path) throws IOException {
-        if (!Files.exists(path)) return new TrackerHistoryStore(path, new StoredTrackerHistory(new ArrayList<>()));
+        return new TrackerHistoryStore(path, readStored(path));
+    }
+
+    private static StoredTrackerHistory readStored(Path path) throws IOException {
+        if (!Files.exists(path)) return new StoredTrackerHistory(new ArrayList<>());
         try (Reader reader = Files.newBufferedReader(path)) {
             StoredTrackerHistory loaded = GSON.fromJson(reader, StoredTrackerHistory.class);
             if (loaded == null || loaded.entries() == null) loaded = new StoredTrackerHistory(new ArrayList<>());
-            return new TrackerHistoryStore(path, loaded);
+            return loaded;
         }
     }
 
@@ -49,23 +52,21 @@ public final class TrackerHistoryStore {
             session.mode(),
             Instant.now().toString()
         );
-        List<TrackerHistoryEntry> updated = new ArrayList<>();
-        updated.add(entry);
-        for (TrackerHistoryEntry existing : history.entries()) {
-            if (!existing.sessionId().equals(entry.sessionId())) {
-                updated.add(existing);
+        AtomicFiles.withLock(path, () -> {
+            StoredTrackerHistory latest = readStored(path);
+            List<TrackerHistoryEntry> updated = new ArrayList<>();
+            updated.add(entry);
+            for (TrackerHistoryEntry existing : latest.entries()) {
+                if (!existing.sessionId().equals(entry.sessionId())) {
+                    updated.add(existing);
+                }
+                if (updated.size() >= MAX_ENTRIES) break;
             }
-            if (updated.size() >= MAX_ENTRIES) break;
-        }
-        history = new StoredTrackerHistory(updated);
-        save();
-    }
-
-    private void save() throws IOException {
-        Files.createDirectories(path.getParent());
-        try (Writer writer = Files.newBufferedWriter(path)) {
-            GSON.toJson(history, writer);
-        }
+            StoredTrackerHistory next = new StoredTrackerHistory(updated);
+            AtomicFiles.writePrivateUtf8(path, GSON.toJson(next));
+            history = next;
+            return null;
+        });
     }
 
     private record StoredTrackerHistory(List<TrackerHistoryEntry> entries) {

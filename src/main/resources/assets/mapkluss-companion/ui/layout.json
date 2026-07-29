@@ -1,0 +1,10 @@
+{
+  "metrics": {
+    "language_width": 34,
+    "back_width": 84,
+    "header_inset": 8,
+    "header_title_y_offset": 9,
+    "header_brand_x": 12,
+    "section_label_x": 18
+  }
+}

@@ -24,6 +24,21 @@ final class AutoFrameTemplateTest {
     }
 
     @Test
+    void numbersRectangularMosaicsLeftToRightThenTopToBottom() {
+        AutoFrameTemplate threeByFour = template(3, 4, hashes(12));
+        assertEquals(0, threeByFour.rowMajorIndex(0, 3));
+        assertEquals(2, threeByFour.rowMajorIndex(2, 3));
+        assertEquals(3, threeByFour.rowMajorIndex(0, 2));
+        assertEquals(11, threeByFour.rowMajorIndex(2, 0));
+
+        AutoFrameTemplate fourByThree = template(4, 3, hashes(12));
+        assertEquals(0, fourByThree.rowMajorIndex(0, 2));
+        assertEquals(3, fourByThree.rowMajorIndex(3, 2));
+        assertEquals(4, fourByThree.rowMajorIndex(0, 1));
+        assertEquals(11, fourByThree.rowMajorIndex(3, 0));
+    }
+
+    @Test
     void isDefensivelyImmutableAndValidatesShapeAndHashes() {
         ArrayList<String> hashes = new ArrayList<>(hashes(1));
         AutoFrameTemplate template = template(1, 1, hashes);

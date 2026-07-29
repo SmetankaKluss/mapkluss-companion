@@ -11,26 +11,94 @@ import java.util.function.BooleanSupplier;
 
 final class MapKlussUi {
     private static final String ELLIPSIS = "...";
-    static final int WHITE = 0xFFFFFFFF;
-    static final int MUTED = 0xFFAAAAAA;
-    static final int DIM = 0xFF686868;
-    static final int ACCENT = 0xFF57FF6E;
-    static final int CYAN = 0xFF8FC7FF;
-    static final int GOLD = 0xFFD9C27A;
-    static final int DANGER = 0xFFFF6677;
-    static final int WARNING = 0xFFFFC46B;
-    static final int SUCCESS = 0xFF8FE388;
+    static int WHITE;
+    static int MUTED;
+    static int DIM;
+    static int ACCENT;
+    static int CYAN;
+    static int AMETHYST;
+    static int GOLD;
+    static int EXPORT;
+    static int DANGER;
+    static int WARNING;
+    static int SUCCESS;
 
-    private static final int PANEL_BG = 0xD00B0B11;
-    private static final int PANEL_INNER = 0x70151520;
-    private static final int PANEL_BORDER = 0xCC57FF6E;
-    private static final int PANEL_BORDER_SOFT = 0x5557FF6E;
-    private static final int SECTION_BG = 0x60101018;
-    private static final int SECTION_BORDER = 0x6650505D;
-    private static final int LANGUAGE_WIDTH = 34;
-    private static final int BACK_WIDTH = 84;
+    private static int CHASSIS;
+    private static int PANEL_BG;
+    private static int PANEL_RAISED;
+    private static int PANEL_INSET;
+    private static int EDGE_HIGHLIGHT;
+    private static int EDGE_MID;
+    private static int EDGE_DARK;
+    private static int BRASS;
+    private static int SECTION_BG;
+    private static int SECTION_BORDER;
+    private static int PANEL_INNER_HIGHLIGHT;
+    private static int PANEL_INNER_SHADOW;
+    private static int PREVIEW_INNER_DARK;
+    private static int PREVIEW_INNER_LIGHT;
+    private static int WELL_INNER_DARK;
+    private static int BACKDROP;
+    private static int BACKDROP_EDGE;
+    private static int BACKDROP_SIDE;
+    private static int LANGUAGE_WIDTH;
+    private static int BACK_WIDTH;
+    private static int HEADER_INSET;
+    private static int HEADER_TITLE_Y_OFFSET;
+    private static int HEADER_BRAND_X;
+    private static int SECTION_LABEL_X;
+
+    static {
+        applyResources(MapKlussUiResourceData.current());
+    }
 
     private MapKlussUi() {
+    }
+
+    static void applyResources(MapKlussUiResourceData.Snapshot snapshot) {
+        WHITE = snapshot.color("white");
+        MUTED = snapshot.color("muted");
+        DIM = snapshot.color("dim");
+        ACCENT = snapshot.color("accent");
+        CYAN = snapshot.color("cyan");
+        AMETHYST = snapshot.color("amethyst");
+        GOLD = snapshot.color("gold");
+        EXPORT = snapshot.color("export");
+        DANGER = snapshot.color("danger");
+        WARNING = snapshot.color("warning");
+        SUCCESS = snapshot.color("success");
+        CHASSIS = snapshot.color("chassis");
+        PANEL_BG = snapshot.color("panel_bg");
+        PANEL_RAISED = snapshot.color("panel_raised");
+        PANEL_INSET = snapshot.color("panel_inset");
+        EDGE_HIGHLIGHT = snapshot.color("edge_highlight");
+        EDGE_MID = snapshot.color("edge_mid");
+        EDGE_DARK = snapshot.color("edge_dark");
+        BRASS = snapshot.color("brass");
+        SECTION_BG = snapshot.color("section_bg");
+        SECTION_BORDER = snapshot.color("section_border");
+        PANEL_INNER_HIGHLIGHT = snapshot.color("panel_inner_highlight");
+        PANEL_INNER_SHADOW = snapshot.color("panel_inner_shadow");
+        PREVIEW_INNER_DARK = snapshot.color("preview_inner_dark");
+        PREVIEW_INNER_LIGHT = snapshot.color("preview_inner_light");
+        WELL_INNER_DARK = snapshot.color("well_inner_dark");
+        BACKDROP = snapshot.color("backdrop");
+        BACKDROP_EDGE = snapshot.color("backdrop_edge");
+        BACKDROP_SIDE = snapshot.color("backdrop_side");
+        LANGUAGE_WIDTH = snapshot.metric("language_width");
+        BACK_WIDTH = snapshot.metric("back_width");
+        HEADER_INSET = snapshot.metric("header_inset");
+        HEADER_TITLE_Y_OFFSET = snapshot.metric("header_title_y_offset");
+        HEADER_BRAND_X = snapshot.metric("header_brand_x");
+        SECTION_LABEL_X = snapshot.metric("section_label_x");
+    }
+
+    static void drawBackdrop(DrawContext context, int screenWidth, int screenHeight) {
+        context.fill(0, 0, screenWidth, screenHeight, BACKDROP);
+        context.fill(0, 0, screenWidth, 2, BACKDROP_EDGE);
+        context.fill(0, screenHeight - 2, screenWidth, screenHeight, BACKDROP_EDGE);
+        context.fill(0, 2, 2, screenHeight - 2, BACKDROP_SIDE);
+        context.fill(screenWidth - 2, 2, screenWidth, screenHeight - 2, BACKDROP_SIDE);
     }
 
     static int panelWidth(int screenWidth, int desiredWidth) {
@@ -64,21 +132,80 @@ final class MapKlussUi {
     }
 
     static void drawPanelAt(DrawContext context, int left, int right, int top, int bottom) {
-        context.fill(left, top, right, bottom, PANEL_BG);
-        context.fill(left + 3, top + 3, right - 3, bottom - 3, PANEL_INNER);
-        context.fill(left, top, right, top + 1, PANEL_BORDER);
-        context.fill(left, bottom - 1, right, bottom, PANEL_BORDER);
-        context.fill(left, top, left + 1, bottom, PANEL_BORDER);
-        context.fill(right - 1, top, right, bottom, PANEL_BORDER);
-        context.fill(left + 2, top + 2, right - 2, top + 3, PANEL_BORDER_SOFT);
+        if (right - left < 12 || bottom - top < 12) return;
+        context.fill(left, top, right, bottom, CHASSIS);
+        context.fill(left, top, right, top + 1, EDGE_HIGHLIGHT);
+        context.fill(left, top, left + 1, bottom, EDGE_HIGHLIGHT);
+        context.fill(left, bottom - 2, right, bottom, EDGE_DARK);
+        context.fill(right - 2, top, right, bottom, EDGE_DARK);
+        context.fill(left + 2, top + 2, right - 2, bottom - 2, EDGE_MID);
+        context.fill(left + 3, top + 3, right - 3, bottom - 3, PANEL_BG);
+        context.fill(left + 4, top + 4, right - 4, top + 5, PANEL_INNER_HIGHLIGHT);
+        context.fill(left + 4, top + 4, left + 5, bottom - 4, PANEL_INNER_HIGHLIGHT);
+        context.fill(left + 4, bottom - 5, right - 4, bottom - 4, PANEL_INNER_SHADOW);
+        context.fill(right - 5, top + 4, right - 4, bottom - 4, PANEL_INNER_SHADOW);
+        drawCornerPins(context, left, right, top, bottom);
     }
 
     static void drawHeader(DrawContext context, TextRenderer renderer, String title, String subtitle, int screenWidth, int y) {
         title = CompanionI18n.translate(title);
         subtitle = CompanionI18n.translate(subtitle);
-        drawCentered(context, renderer, title, screenWidth, y, WHITE);
+        int left = HEADER_INSET;
+        int right = Math.max(left + 80, screenWidth - HEADER_INSET);
+        int top = Math.max(4, y - HEADER_TITLE_Y_OFFSET);
+        int bottom = y + (subtitle == null || subtitle.isBlank() ? 17 : 29);
+        drawRaisedPlate(context, left, top, right, bottom);
+        if (screenWidth >= 420) {
+            drawLeft(context, renderer, "MAPKLUSS", left + HEADER_BRAND_X, y, 96, WHITE);
+        }
+        int titleWidth = Math.max(80, screenWidth - (screenWidth >= 420 ? 250 : 100));
+        String clippedTitle = clip(renderer, title, titleWidth);
+        int clippedTitleWidth = renderer.getWidth(clippedTitle);
+        int titleCenter = screenWidth / 2;
+        int leftSignal = titleCenter - clippedTitleWidth / 2 - 12;
+        int rightSignal = titleCenter + clippedTitleWidth / 2 + 8;
+        if (leftSignal > left + 114) {
+            context.fill(leftSignal, y + 4, leftSignal + 4, y + 7, CYAN);
+        }
+        if (rightSignal + 4 < right - LANGUAGE_WIDTH - 12) {
+            context.fill(rightSignal, y + 4, rightSignal + 4, y + 7, CYAN);
+        }
+        context.drawCenteredTextWithShadow(renderer, Text.literal(clippedTitle), titleCenter, y, WHITE);
         if (subtitle != null && !subtitle.isBlank()) {
-            drawCentered(context, renderer, subtitle, screenWidth, y + 16, MUTED);
+            drawCenteredIn(context, renderer, subtitle, screenWidth / 2, y + 14, titleWidth, CYAN);
+        }
+    }
+
+    static void drawLocalHeader(
+        DrawContext context,
+        TextRenderer renderer,
+        String title,
+        String subtitle,
+        int left,
+        int right,
+        int y
+    ) {
+        title = CompanionI18n.translate(title);
+        subtitle = CompanionI18n.translate(subtitle);
+        int safeRight = Math.max(left + 80, right);
+        int top = Math.max(4, y - HEADER_TITLE_Y_OFFSET);
+        int bottom = y + (subtitle == null || subtitle.isBlank() ? 17 : 29);
+        drawRaisedPlate(context, left, top, safeRight, bottom);
+        int titleCenter = (left + safeRight) / 2;
+        int titleWidth = Math.max(40, safeRight - left - 44);
+        String clippedTitle = clip(renderer, title, titleWidth);
+        int clippedTitleWidth = renderer.getWidth(clippedTitle);
+        int leftSignal = titleCenter - clippedTitleWidth / 2 - 12;
+        int rightSignal = titleCenter + clippedTitleWidth / 2 + 8;
+        if (leftSignal > left + 12) {
+            context.fill(leftSignal, y + 4, leftSignal + 4, y + 7, CYAN);
+        }
+        if (rightSignal + 4 < safeRight - 12) {
+            context.fill(rightSignal, y + 4, rightSignal + 4, y + 7, CYAN);
+        }
+        context.drawCenteredTextWithShadow(renderer, Text.literal(clippedTitle), titleCenter, y, WHITE);
+        if (subtitle != null && !subtitle.isBlank()) {
+            drawCenteredIn(context, renderer, subtitle, titleCenter, y + 14, titleWidth, CYAN);
         }
     }
 
@@ -132,14 +259,11 @@ final class MapKlussUi {
     static void drawSectionAt(DrawContext context, TextRenderer renderer, String label, int left, int panelWidth, int y, int height) {
         if (height <= 0) return;
         int right = left + panelWidth;
-        context.fill(left - 2, y, right + 2, y + height, SECTION_BG);
-        context.fill(left - 2, y, right + 2, y + 1, SECTION_BORDER);
-        context.fill(left - 2, y + height - 1, right + 2, y + height, SECTION_BORDER);
-        context.fill(left - 2, y, left - 1, y + height, SECTION_BORDER);
-        context.fill(right + 1, y, right + 2, y + height, SECTION_BORDER);
+        drawInsetWell(context, left - 2, y, right + 2, y + height);
         if (label != null && !label.isBlank()) {
             label = CompanionI18n.translate(label);
-            drawLeft(context, renderer, label.toUpperCase(), left + 6, y + 7, panelWidth - 12, CYAN);
+            context.fill(left + 5, y + 4, Math.min(right - 5, left + 12), y + 11, BRASS);
+            drawLeft(context, renderer, label.toUpperCase(), left + SECTION_LABEL_X, y + 5, panelWidth - 26, CYAN);
         }
     }
 
@@ -154,7 +278,8 @@ final class MapKlussUi {
     ) {
         if (label != null && !label.isBlank()) {
             label = CompanionI18n.translate(label);
-            drawLeft(context, renderer, label.toUpperCase(), left + 2, rowY - 12, panelWidth - 4, CYAN);
+            context.fill(left, rowY - 7, left + 5, rowY - 5, BRASS);
+            drawLeft(context, renderer, label.toUpperCase(), left + 9, rowY - 12, panelWidth - 11, CYAN);
         }
     }
 
@@ -194,9 +319,7 @@ final class MapKlussUi {
         int cardHeight = detail == null || detail.isBlank() ? 34 : 48;
         int cardLeft = left + (width - cardWidth) / 2;
         int cardTop = top + Math.max(18, (height - cardHeight) / 3);
-        context.fill(cardLeft, cardTop, cardLeft + cardWidth, cardTop + cardHeight, 0x50101018);
-        context.fill(cardLeft, cardTop, cardLeft + cardWidth, cardTop + 1, SECTION_BORDER);
-        context.fill(cardLeft, cardTop + cardHeight - 1, cardLeft + cardWidth, cardTop + cardHeight, SECTION_BORDER);
+        drawInsetWell(context, cardLeft, cardTop, cardLeft + cardWidth, cardTop + cardHeight);
         drawCenteredIn(context, renderer, title, cardLeft + cardWidth / 2, cardTop + 9, cardWidth - 14, ACCENT);
         if (detail != null && !detail.isBlank()) {
             drawCenteredIn(context, renderer, detail, cardLeft + cardWidth / 2, cardTop + 25, cardWidth - 14, MUTED);
@@ -208,8 +331,34 @@ final class MapKlussUi {
         context.drawTextWithShadow(renderer, clippedText(renderer, value, maxWidth), x, y, color);
     }
 
+    static void drawRight(DrawContext context, TextRenderer renderer, String value, int right, int y, int maxWidth, int color) {
+        value = CompanionI18n.translate(value);
+        String clipped = clip(renderer, value, maxWidth);
+        context.drawTextWithShadow(renderer, Text.literal(clipped), right - renderer.getWidth(clipped), y, color);
+    }
+
     static void drawFieldLabel(DrawContext context, TextRenderer renderer, String value, int x, int inputY, int maxWidth) {
+        drawInsetWell(context, x - 2, inputY - 2, x + maxWidth + 2, inputY + 22);
         drawLeft(context, renderer, value, x + 2, inputY - 10, Math.max(0, maxWidth - 4), CYAN);
+    }
+
+    static void drawPreviewWell(DrawContext context, int left, int top, int right, int bottom) {
+        if (right - left < 12 || bottom - top < 12) return;
+        context.fill(left, top, right, bottom, EDGE_DARK);
+        context.fill(left + 1, top + 1, right - 1, bottom - 1, EDGE_MID);
+        context.fill(left + 3, top + 3, right - 3, bottom - 3, PANEL_INSET);
+        context.fill(left + 3, top + 3, right - 3, top + 4, PREVIEW_INNER_DARK);
+        context.fill(left + 3, top + 3, left + 4, bottom - 3, PREVIEW_INNER_DARK);
+        context.fill(left + 3, bottom - 4, right - 3, bottom - 3, PREVIEW_INNER_LIGHT);
+        context.fill(right - 4, top + 3, right - 3, bottom - 3, PREVIEW_INNER_LIGHT);
+        drawCornerPins(context, left, right, top, bottom);
+    }
+
+    static void drawDataStrip(DrawContext context, int left, int right, int top, int bottom) {
+        if (right - left < 8 || bottom - top < 8) return;
+        drawInsetWell(context, left, top, right, bottom);
+        context.fill(left + 6, top + 5, left + 9, top + 8, CYAN);
+        context.fill(right - 9, bottom - 8, right - 6, bottom - 5, BRASS);
     }
 
     static ClickableWidget languageButton(Screen screen) {
@@ -226,7 +375,7 @@ final class MapKlussUi {
                     MapKlussCompanionClient.LOGGER.warn("Failed to toggle MapKluss Companion language.", e);
                 }
             })
-            .dimensions(x, y, 34, 18)
+            .dimensions(x, y, LANGUAGE_WIDTH, 18)
             .build();
     }
 
@@ -328,5 +477,33 @@ final class MapKlussUi {
     }
 
     private record WrappedLine(String text, int consumedChars) {
+    }
+
+    private static void drawRaisedPlate(DrawContext context, int left, int top, int right, int bottom) {
+        context.fill(left, top, right, bottom, PANEL_RAISED);
+        context.fill(left, top, right, top + 1, EDGE_HIGHLIGHT);
+        context.fill(left, top, left + 1, bottom, EDGE_HIGHLIGHT);
+        context.fill(left, bottom - 2, right, bottom, EDGE_DARK);
+        context.fill(right - 2, top, right, bottom, EDGE_DARK);
+        context.fill(left + 2, top + 2, right - 2, bottom - 2, PANEL_BG);
+    }
+
+    private static void drawInsetWell(DrawContext context, int left, int top, int right, int bottom) {
+        if (right - left < 4 || bottom - top < 4) return;
+        context.fill(left, top, right, bottom, EDGE_DARK);
+        context.fill(left + 1, top + 1, right - 1, bottom - 1, SECTION_BORDER);
+        context.fill(left + 2, top + 2, right - 2, bottom - 2, SECTION_BG);
+        context.fill(left + 2, top + 2, right - 2, top + 3, WELL_INNER_DARK);
+        context.fill(left + 2, top + 2, left + 3, bottom - 2, WELL_INNER_DARK);
+        context.fill(left + 2, bottom - 3, right - 2, bottom - 2, PREVIEW_INNER_LIGHT);
+        context.fill(right - 3, top + 2, right - 2, bottom - 2, PREVIEW_INNER_LIGHT);
+    }
+
+    private static void drawCornerPins(DrawContext context, int left, int right, int top, int bottom) {
+        int pin = BRASS;
+        context.fill(left + 5, top + 5, left + 7, top + 7, pin);
+        context.fill(right - 7, top + 5, right - 5, top + 7, pin);
+        context.fill(left + 5, bottom - 7, left + 7, bottom - 5, pin);
+        context.fill(right - 7, bottom - 7, right - 5, bottom - 5, pin);
     }
 }

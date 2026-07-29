@@ -118,6 +118,7 @@ public final class SuppressionPlanParser {
                 || phase.verifiedTargetPixels() != 8192 + (expectedIndex + 1) * 128) {
                 throw new IOException("Two-layer phase exceeds safety limits");
             }
+            Set<Integer> phaseRemovalCells = new HashSet<>();
             for (SuppressionPlan.RemovalRun run : phase.removeRuns()) {
                 if (run == null || run.length() < 1 || run.length() > 254 || run.paletteIndex() <= 0 || run.paletteIndex() >= plan.palette().size()) {
                     throw new IOException("Two-layer removal run is invalid");
@@ -128,7 +129,17 @@ public final class SuppressionPlanParser {
                 if (run.xStart() < phaseX0 || run.xStart() + run.length() - 1 > phaseX1) {
                     throw new IOException("Two-layer removal run leaves its phase columns");
                 }
+                for (int dx = 0; dx < run.length(); dx++) {
+                    int localX = run.xStart() + dx - phaseX0;
+                    int removalCell = run.z() * 2 + localX;
+                    if (!phaseRemovalCells.add(removalCell)) {
+                        throw new IOException("Two-layer removal phase contains a duplicate map cell");
+                    }
+                }
                 removedBlocks += run.length();
+            }
+            if (phaseRemovalCells.size() != 256) {
+                throw new IOException("Two-layer removal phase does not cover both full columns");
             }
             Set<Integer> phasePixels = new HashSet<>();
             for (SuppressionPlan.PixelRun run : phase.updatePixelRuns()) {

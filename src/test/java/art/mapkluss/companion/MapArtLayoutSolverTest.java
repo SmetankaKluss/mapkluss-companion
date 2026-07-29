@@ -28,6 +28,36 @@ final class MapArtLayoutSolverTest {
     }
 
     @Test
+    void preservesThreeByFourDimensionsAndTopDownZOrder() {
+        List<MapArtLayoutSolver.Tile> expected = mosaic(3, 4);
+        List<MapArtLayoutSolver.Tile> shuffled = new ArrayList<>(expected);
+        Collections.shuffle(shuffled, new Random(31));
+
+        MapArtLayoutSolver.Layout layout = MapArtLayoutSolver.solveWithDimensions(shuffled, 3, 4);
+
+        assertEquals(3, layout.wide());
+        assertEquals(4, layout.tall());
+        assertEquals(expected.stream().map(MapArtLayoutSolver.Tile::hash).toList(), layout.tileHashes());
+        assertEquals(expected.stream().map(MapArtLayoutSolver.Tile::mapId).toList(), layout.tileMapIds());
+        assertTrue(layout.reliable());
+    }
+
+    @Test
+    void preservesFourByThreeDimensionsAndTopDownZOrder() {
+        List<MapArtLayoutSolver.Tile> expected = mosaic(4, 3);
+        List<MapArtLayoutSolver.Tile> shuffled = new ArrayList<>(expected);
+        Collections.shuffle(shuffled, new Random(47));
+
+        MapArtLayoutSolver.Layout layout = MapArtLayoutSolver.solveWithDimensions(shuffled, 4, 3);
+
+        assertEquals(4, layout.wide());
+        assertEquals(3, layout.tall());
+        assertEquals(expected.stream().map(MapArtLayoutSolver.Tile::hash).toList(), layout.tileHashes());
+        assertEquals(expected.stream().map(MapArtLayoutSolver.Tile::mapId).toList(), layout.tileMapIds());
+        assertTrue(layout.reliable());
+    }
+
+    @Test
     void honorsBottomLeftAnchor() {
         List<MapArtLayoutSolver.Tile> expected = mosaic(2, 2);
         List<MapArtLayoutSolver.Tile> shuffled = new ArrayList<>(expected);

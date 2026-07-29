@@ -61,6 +61,14 @@ final class SuppressionReferenceLitematicTest {
         assertThrows(Exception.class, () -> SuppressionReferenceLitematic.build(planSha, plan, corrupted, 0));
     }
 
+    @Test
+    void validatesTheCompletePinnedSource() throws Exception {
+        byte[] source = SuppressionTestFixtures.litematicV3Bytes();
+        SuppressionPlan plan = SuppressionTestFixtures.planV3(source);
+
+        SuppressionReferenceLitematic.validateSource(plan, source);
+    }
+
     private static int stateAt(byte[] bytes, SuppressionPlan plan, int localX, int localY, int localZ) throws Exception {
         SuppressionNbt.Document document = SuppressionNbt.readCompressed(bytes);
         Map<String, SuppressionNbt.Tag> root = SuppressionNbt.compound(document.root(), "root");

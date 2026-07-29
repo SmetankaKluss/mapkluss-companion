@@ -43,6 +43,17 @@ final class CompanionI18n {
         put("Скан карты", "Scan map");
         put("Трекер", "Tracker");
         put("Закрыть", "Close");
+        put("Позже", "Later");
+        put("Telegram", "Telegram");
+        put("Скачать мод", "Download mod");
+        put("Доступна новая версия", "New version available");
+        put(" уже доступен.", " is now available.");
+        put("Распознавание карт отменено", "Map identification cancelled");
+        put("Откройте инвентарь или хранилище с картами", "Open an inventory or container with maps");
+        put("Загружаю и распознаю карты…", "Loading and identifying maps…");
+        put("В открытых слотах нет заполненных карт", "There are no filled maps in the open slots");
+        put("Не все карты загрузились. Повторите распознавание", "Some maps did not load. Try identification again");
+        put("Распознано карт: ", "Maps identified: ");
         put("Сайт", "Site");
         put("Редактор", "Editor");
         put("Назад", "Back");
@@ -340,7 +351,9 @@ final class CompanionI18n {
         put("Импорт Two-layer", "Import Two-layer");
         put("Из облака", "From Cloud");
         put("Выбрать ZIP", "Choose ZIP");
+        put("Импорт ZIP", "Import ZIP");
         put("Импорт ZIP MapKluss", "Import MapKluss ZIP");
+        put("Выберите источник", "Choose a source");
         put("Облачный план", "Cloud plan");
         put("Требуется арт с Two-layer файлами", "An art with Two-layer files is required");
         put("Подтвердить выход", "Confirm logout");
@@ -623,6 +636,12 @@ final class CompanionI18n {
         put("Расхождение: ", "Mismatch: ");
         put(" пикс. J: подтвердить", " pixels. J: confirm");
         put(" пикс. Нажмите J ещё раз.", " pixels. Press J again.");
+    }
+
+    static {
+        put("Закрепить по угловой рамке", "Anchor from a corner frame");
+        put("Откройте мир и смотрите на угловую рамку арта", "Open a world and look at a corner frame of the art");
+        put("Смотрите на угловую рамку арта и нажмите клавишу AutoFrame", "Look at a corner frame of the art and press the AutoFrame key");
     }
 
     private CompanionI18n() {

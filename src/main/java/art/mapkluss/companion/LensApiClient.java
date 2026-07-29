@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.Type;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -13,6 +14,7 @@ import java.time.Duration;
 import java.util.Collection;
 
 public final class LensApiClient {
+    private static final int MAX_API_RESPONSE_BYTES = 4 * 1024 * 1024;
     private static final Gson GSON = new Gson();
     static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
     static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(12);
@@ -24,11 +26,21 @@ public final class LensApiClient {
     private final URI endpoint;
     private final String anonKey;
     private final String bearerToken;
+    private final CompanionConfig routingConfig;
 
     public LensApiClient(String supabaseUrl, String anonKey, String bearerToken) {
+        this(supabaseUrl, anonKey, bearerToken, null);
+    }
+
+    public LensApiClient(CompanionConfig config, String bearerToken) {
+        this(config.supabaseUrl(), config.supabaseAnonKey(), bearerToken, config);
+    }
+
+    private LensApiClient(String supabaseUrl, String anonKey, String bearerToken, CompanionConfig routingConfig) {
         this.endpoint = URI.create(stripTrailingSlash(supabaseUrl) + "/functions/v1/companion-lens");
         this.anonKey = anonKey;
         this.bearerToken = bearerToken;
+        this.routingConfig = routingConfig;
     }
 
     public LensDtos.Capabilities capabilities() throws IOException, InterruptedException {
@@ -108,9 +120,24 @@ public final class LensApiClient {
     }
 
     private <T> T post(JsonObject payload, Type type) throws IOException, InterruptedException {
-        HttpResponse<String> response = HTTP.send(request(payload), HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw parseError(response.statusCode(), response.body());
+        URI selectedEndpoint = routedEndpoint();
+        ApiResponse response;
+        try {
+            response = sendPost(selectedEndpoint, payload);
+        } catch (IOException error) {
+            if (!canFallback(selectedEndpoint)) throw error;
+            CompanionBackendRouter.reportFailure(routingConfig, selectedEndpoint);
+            if (!safeToRetry(payload)) throw error;
+            response = sendPost(CompanionBackendRouter.directEndpoint(routingConfig, endpoint.getPath()), payload);
+        }
+        if (retryableGatewayStatus(selectedEndpoint, response.status()) && safeToRetry(payload)) {
+            CompanionBackendRouter.reportFailure(routingConfig, selectedEndpoint);
+            response = sendPost(CompanionBackendRouter.directEndpoint(routingConfig, endpoint.getPath()), payload);
+        } else if (retryableGatewayStatus(selectedEndpoint, response.status())) {
+            CompanionBackendRouter.reportFailure(routingConfig, selectedEndpoint);
+        }
+        if (response.status() < 200 || response.status() >= 300) {
+            throw parseError(response.status(), response.body());
         }
         JsonObject json = GSON.fromJson(response.body(), JsonObject.class);
         if (json == null || !json.has("apiVersion") || json.get("apiVersion").getAsInt() != LensDtos.API_VERSION) {
@@ -121,14 +148,56 @@ public final class LensApiClient {
         return result;
     }
 
+    private ApiResponse sendPost(URI target, JsonObject payload) throws IOException, InterruptedException {
+        HttpResponse<InputStream> response = HTTP.send(request(target, payload), HttpResponse.BodyHandlers.ofInputStream());
+        byte[] responseBytes;
+        try (InputStream body = response.body()) {
+            responseBytes = CompanionApiClient.readBounded(
+                body,
+                response.statusCode() >= 200 && response.statusCode() < 300 ? MAX_API_RESPONSE_BYTES : 64 * 1024
+            );
+        }
+        String responseBody = new String(responseBytes, java.nio.charset.StandardCharsets.UTF_8);
+        return new ApiResponse(response.statusCode(), responseBody);
+    }
+
     HttpRequest request(JsonObject payload) {
-        return HttpRequest.newBuilder(endpoint)
+        return request(routedEndpoint(), payload);
+    }
+
+    private HttpRequest request(URI target, JsonObject payload) {
+        return HttpRequest.newBuilder(target)
             .timeout(REQUEST_TIMEOUT)
             .header("apikey", anonKey)
             .header("Authorization", "Bearer " + bearerToken)
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
             .build();
+    }
+
+    private URI routedEndpoint() {
+        if (routingConfig == null) return endpoint;
+        return URI.create(CompanionBackendRouter.select(routingConfig) + endpoint.getPath());
+    }
+
+    private boolean canFallback(URI attemptedUri) {
+        return routingConfig != null
+            && !CompanionBackendRouter.directEndpoint(routingConfig, endpoint.getPath()).equals(attemptedUri);
+    }
+
+    private boolean retryableGatewayStatus(URI attemptedUri, int status) {
+        return canFallback(attemptedUri) && (status == 502 || status == 503 || status == 504);
+    }
+
+    private static boolean safeToRetry(JsonObject payload) {
+        String action = payload != null && payload.has("action") ? payload.get("action").getAsString() : "";
+        return switch (action) {
+            case "capabilities", "session_list", "session_poll", "presence_heartbeat" -> true;
+            default -> false;
+        };
+    }
+
+    private record ApiResponse(int status, String body) {
     }
 
     private <T> T post(JsonObject payload, Class<T> type) throws IOException, InterruptedException {

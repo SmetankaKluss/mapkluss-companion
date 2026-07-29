@@ -16,6 +16,15 @@ final class SuppressionReferenceLitematic {
 
     private SuppressionReferenceLitematic() { }
 
+    /** Validates the complete pinned source before it reaches a managed folder or Litematica. */
+    static void validateSource(SuppressionPlan plan, byte[] sourceLitematic) throws IOException {
+        if (plan == null || plan.phases() == null || plan.phases().isEmpty()) {
+            throw new IOException("Invalid Two-layer source plan");
+        }
+        build("0000000000000000000000000000000000000000000000000000000000000000",
+            plan, sourceLitematic, plan.phases().size() - 1);
+    }
+
     static Path install(
         Path runDir,
         String planSha256,

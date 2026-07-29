@@ -13,10 +13,11 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class ScanScreen extends Screen {
-    private static final int PANEL_WIDTH = 500;
-    private static final int SECTION_WIDTH = 500;
+    private static final int PANEL_WIDTH = 1120;
+    private static final int SECTION_WIDTH = 1120;
     private static final int SIDE_RAIL_WIDTH = 138;
     private static final int SIDE_RAIL_GAP = 22;
     private static final int ACTION_ROWS = 4;
@@ -45,6 +46,8 @@ public final class ScanScreen extends Screen {
     private String status = "";
     private int actionPage;
     private final CompanionConfirmation deleteConfirmation = new CompanionConfirmation();
+    private final ScreenRequestGate requests = new ScreenRequestGate();
+    private final AtomicBoolean uploadInFlight = new AtomicBoolean();
 
     public ScanScreen(Screen parent) {
         super(Component.literal("Скан MapKluss"));
@@ -53,6 +56,7 @@ public final class ScanScreen extends Screen {
 
     @Override
     protected void init() {
+        requests.attach();
         clearWidgets();
         loadHistory();
         int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
@@ -76,6 +80,12 @@ public final class ScanScreen extends Screen {
         setFocused(null);
         titleInput.setFocused(false);
         updateButtonStates();
+    }
+
+    @Override
+    public void removed() {
+        requests.detach();
+        super.removed();
     }
 
     private void addPagedActionControls(int left, int panelWidth, int gap) {
@@ -105,8 +115,8 @@ public final class ScanScreen extends Screen {
             int w = Math.max(36, (panelWidth - gap * 4) / 5);
             addRenderableWidget(MapKlussButton.builder(Component.literal("Угол A"), button -> setCornerA()).tooltip(CompanionI18n.text("Запомнить первый угол стены")).dimensions(left, rowY, w, 20).build());
             addRenderableWidget(MapKlussButton.builder(Component.literal("Угол B"), button -> setCornerB()).tooltip(CompanionI18n.text("Запомнить второй угол стены")).dimensions(left + w + gap, rowY, w, 20).build());
-            savePngButton = addRenderableWidget(MapKlussButton.builder(Component.literal("PNG"), button -> savePng()).gold().tooltip(CompanionI18n.text("Сохранить PNG скана")).dimensions(left + (w + gap) * 2, rowY, w, 20).build());
-            uploadButton = addRenderableWidget(MapKlussButton.builder(Component.literal("В облако"), button -> uploadScan()).gold().tooltip(CompanionI18n.text("Загрузить скан в облако")).dimensions(left + (w + gap) * 3, rowY, w, 20).build());
+            savePngButton = addRenderableWidget(MapKlussButton.builder(Component.literal("PNG"), button -> savePng()).exportAction().tooltip(CompanionI18n.text("Сохранить PNG скана")).dimensions(left + (w + gap) * 2, rowY, w, 20).build());
+            uploadButton = addRenderableWidget(MapKlussButton.builder(Component.literal("В облако"), button -> uploadScan()).special().tooltip(CompanionI18n.text("Загрузить скан в облако")).dimensions(left + (w + gap) * 3, rowY, w, 20).build());
             refreshImportButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Проверить"), button -> refreshImportStatus()).tooltip(CompanionI18n.text("Проверить состояние импорта")).dimensions(left + (w + gap) * 4, rowY, panelWidth - (w + gap) * 4, 20).build());
             return;
         }
@@ -122,9 +132,9 @@ public final class ScanScreen extends Screen {
             return;
         }
         int w = Math.max(52, (panelWidth - gap * 2) / 3);
-        artButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Арт"), button -> openSavedArt()).gold().dimensions(left, rowY, w, 20).build());
-        editorButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Редактор"), button -> openEditor()).gold().dimensions(left + w + gap, rowY, w, 20).build());
-        cloudButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Облако"), button -> openCloud()).gold().dimensions(left + (w + gap) * 2, rowY, panelWidth - (w + gap) * 2, 20).build());
+        artButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Арт"), button -> openSavedArt()).technical().dimensions(left, rowY, w, 20).build());
+        editorButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Редактор"), button -> openEditor()).technical().dimensions(left + w + gap, rowY, w, 20).build());
+        cloudButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Облако"), button -> openCloud()).technical().dimensions(left + (w + gap) * 2, rowY, panelWidth - (w + gap) * 2, 20).build());
     }
 
     private int actionTabsY() {
@@ -148,9 +158,9 @@ public final class ScanScreen extends Screen {
             .dimensions(railLeft, 162, halfWidth, 20).build());
         addRenderableWidget(MapKlussButton.builder(Component.literal("Угол B"), button -> setCornerB())
             .dimensions(railLeft + halfWidth + gap, 162, halfWidth, 20).build());
-        savePngButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Сохранить PNG"), button -> savePng()).gold()
+        savePngButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Сохранить PNG"), button -> savePng()).exportAction()
             .dimensions(railLeft, 188, SIDE_RAIL_WIDTH, 20).build());
-        uploadButton = addRenderableWidget(MapKlussButton.builder(Component.literal("В облако"), button -> uploadScan()).gold()
+        uploadButton = addRenderableWidget(MapKlussButton.builder(Component.literal("В облако"), button -> uploadScan()).special()
             .dimensions(railLeft, 214, SIDE_RAIL_WIDTH, 20).build());
         refreshImportButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Проверить импорт"), button -> refreshImportStatus())
             .dimensions(railLeft, 240, SIDE_RAIL_WIDTH, 20).build());
@@ -167,11 +177,11 @@ public final class ScanScreen extends Screen {
             .dimensions(railLeft + halfWidth + gap, 350, halfWidth, 20).build());
 
         int openY = Math.max(390, height - 104);
-        artButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Арт"), button -> openSavedArt()).gold()
+        artButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Арт"), button -> openSavedArt()).technical()
             .dimensions(railLeft, openY, halfWidth, 20).build());
-        editorButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Редактор"), button -> openEditor()).gold()
+        editorButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Редактор"), button -> openEditor()).technical()
             .dimensions(railLeft + halfWidth + gap, openY, halfWidth, 20).build());
-        cloudButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Облако"), button -> openCloud()).gold()
+        cloudButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Облако"), button -> openCloud()).technical()
             .dimensions(railLeft, openY + 26, halfWidth, 20).build());
     }
 
@@ -231,7 +241,7 @@ public final class ScanScreen extends Screen {
 
     private void setCornerB() {
         try {
-            cornerB = MapScanService.captureTargetCorner(client());
+            cornerB = MapScanService.captureTargetCorner(client(), cornerA);
             status = "Угол B: " + cornerB.label();
         } catch (Exception e) {
             status = CompanionUiErrors.message("scan", e);
@@ -283,47 +293,59 @@ public final class ScanScreen extends Screen {
             status = CompanionUiErrors.message("save", e);
             return;
         }
+        if (!uploadInFlight.compareAndSet(false, true)) {
+            status = "Загрузка скана уже выполняется.";
+            return;
+        }
+        MapScanDraft requestedDraft = draft;
+        Path requestedPath = currentDraftLocalPath();
+        ScreenRequestGate.Token request = requests.begin("upload");
         status = "Загрузка скана в облако...";
+        updateButtonStates();
         CompletableFuture.runAsync(() -> {
             try {
                 CompanionRuntime runtime = CompanionRuntime.create(client());
                 if (!runtime.sessionStore().hasAccessToken()) {
-                    runOnClient(() -> status = "Сначала войдите через код входа.");
+                    runOnClient(request, () -> status = "Сначала войдите через код входа.");
                     return;
                 }
-                ScanUploadResponse response = runtime.apiClient().uploadScan(draft);
-                ScanHistoryEntry updatedEntry = attachUploadToHistory(response);
+                ScanUploadResponse response = runtime.apiClient().uploadScan(requestedDraft);
+                attachUploadToHistory(response, requestedDraft, requestedPath);
                 ScanImportDetails details = null;
                 try {
                     details = runtime.apiClient().scanImport(response.importId());
-                    rememberImportDetails(details);
+                    persistImportDetails(requestedPath.toString(), details);
                 } catch (Exception ignored) {
                     // Upload itself already succeeded; import details can be refreshed later from Cloud/Art actions.
                 }
                 ScanImportDetails finalDetails = details;
-                runOnClient(() -> {
-                    upload = response;
+                runOnClient(request, () -> {
+                    boolean stillSelected = draft == requestedDraft;
+                    if (stillSelected) upload = response;
+                    reloadHistoryAt(requestedPath.toString(), stillSelected);
                     boolean hasCreatedArt = finalDetails != null && finalDetails.hasCreatedArt();
                     syncTitleInput();
                     updateButtonStates();
-                    status = response.reused()
+                    String completed = response.reused()
                         ? (hasCreatedArt
                             ? "Скан уже загружен и привязан к арту."
                             : "Скан уже загружен: " + response.importId())
                         : (hasCreatedArt
                             ? "Скан загружен, найден сохраненный арт."
                             : "Скан загружен: " + response.importId());
-                    if (updatedEntry != null) {
-                        loadHistory();
-                        historyIndex = 0;
-                    }
+                    status = stillSelected ? completed : "Загрузка предыдущего скана завершена.";
                 });
             } catch (Exception e) {
                 if (CompanionAuthSupport.isAuthFailure(e)) {
-                    expireSessionLocally(CompanionAuthSupport.expiredMessage());
+                    expireSessionLocally(request, CompanionAuthSupport.expiredMessage());
                 } else {
-                    runOnClient(() -> status = CompanionUiErrors.message("sync", e));
+                    runOnClient(request, () -> status = CompanionUiErrors.message("sync", e));
                 }
+            } finally {
+                uploadInFlight.set(false);
+                client().execute(() -> {
+                    if (client().gui.screen() == this) updateButtonStates();
+                });
             }
         });
     }
@@ -341,7 +363,10 @@ public final class ScanScreen extends Screen {
             }
             return;
         }
-        String importId = activeImportId();
+        ActiveScanTarget target = activeTarget();
+        String importId = target == null ? null : target.importId();
+        String localPath = target == null ? null : target.localPath();
+        ScreenRequestGate.Token request = requests.begin("open-cloud");
         CompletableFuture.runAsync(() -> {
             try {
                 CompanionRuntime runtime = CompanionRuntime.create(client());
@@ -349,7 +374,7 @@ public final class ScanScreen extends Screen {
                 String nextStatus = "Открыта страница облака.";
                 if (importId != null) {
                     ScanImportDetails details = runtime.apiClient().scanImport(importId);
-                    rememberImportDetails(details);
+                    persistImportDetails(localPath, details);
                     if (details.hasCreatedArt()) {
                         path = "/art/" + details.createdArtId();
                         nextStatus = "Открыт сохраненный арт.";
@@ -360,13 +385,16 @@ public final class ScanScreen extends Screen {
                 }
                 String finalPath = path;
                 String finalStatus = nextStatus;
-                Util.getPlatform().openUri(runtime.config().siteUri(finalPath));
-                runOnClient(() -> status = finalStatus);
+                runOnClient(request, () -> {
+                    if (localPath != null) reloadHistoryAt(localPath, true);
+                    Util.getPlatform().openUri(runtime.config().siteUri(finalPath));
+                    status = finalStatus;
+                });
             } catch (Exception e) {
                 if (CompanionAuthSupport.isAuthFailure(e)) {
-                    expireSessionLocally(CompanionAuthSupport.expiredMessage());
+                    expireSessionLocally(request, CompanionAuthSupport.expiredMessage());
                 } else {
-                    runOnClient(() -> status = CompanionUiErrors.message("site", e));
+                    runOnClient(request, () -> status = CompanionUiErrors.message("site", e));
                 }
             }
         });
@@ -379,36 +407,41 @@ public final class ScanScreen extends Screen {
             status = "Открыт сохраненный арт в моде.";
             return;
         }
-        String importId = activeImportId();
+        ActiveScanTarget target = activeTarget();
+        String importId = target == null ? null : target.importId();
         if (importId == null) {
             status = "Сначала загрузите скан, чтобы открыть арт.";
             return;
         }
+        String localPath = target.localPath();
+        String requestedTitle = target.title();
+        ScreenRequestGate.Token request = requests.begin("open-art");
         CompletableFuture.runAsync(() -> {
             try {
                 CompanionRuntime runtime = CompanionRuntime.create(client());
                 ScanImportDetails details = runtime.apiClient().scanImport(importId);
-                rememberImportDetails(details);
+                persistImportDetails(localPath, details);
                 if (!details.hasCreatedArt()) {
-                    runOnClient(() -> status = "Этот скан еще не сохранен как арт.");
+                    runOnClient(request, () -> status = "Этот скан еще не сохранен как арт.");
                     return;
                 }
-                runOnClient(() -> {
-                    client().gui.setScreen(new CompanionArtScreen(this, details.createdArtId(), draft == null ? "Сканированный арт" : draft.title()));
+                runOnClient(request, () -> {
+                    client().gui.setScreen(new CompanionArtScreen(this, details.createdArtId(), requestedTitle));
                     status = "Открыт сохраненный арт в моде.";
                 });
             } catch (Exception e) {
                 if (CompanionAuthSupport.isAuthFailure(e)) {
-                    expireSessionLocally(CompanionAuthSupport.expiredMessage());
+                    expireSessionLocally(request, CompanionAuthSupport.expiredMessage());
                 } else {
-                    runOnClient(() -> status = CompanionUiErrors.message("site", e));
+                    runOnClient(request, () -> status = CompanionUiErrors.message("site", e));
                 }
             }
         });
     }
 
     private void openEditor() {
-        String importId = activeImportId();
+        ActiveScanTarget target = activeTarget();
+        String importId = target == null ? null : target.importId();
         if (importId == null) {
             status = "Сначала загрузите скан, чтобы открыть редактор.";
             return;
@@ -447,22 +480,26 @@ public final class ScanScreen extends Screen {
     }
 
     private void refreshImportStatus() {
-        String importId = activeImportId();
+        ActiveScanTarget target = activeTarget();
+        String importId = target == null ? null : target.importId();
         if (importId == null) {
             status = "Сначала загрузите скан.";
             return;
         }
         status = "Проверка импорта в облаке...";
+        String localPath = target.localPath();
+        ScreenRequestGate.Token request = requests.begin("refresh-import");
         CompletableFuture.runAsync(() -> {
             try {
                 CompanionRuntime runtime = CompanionRuntime.create(client());
                 if (!runtime.sessionStore().hasAccessToken()) {
-                    runOnClient(() -> status = "Сначала войдите через код входа.");
+                    runOnClient(request, () -> status = "Сначала войдите через код входа.");
                     return;
                 }
                 ScanImportDetails details = runtime.apiClient().scanImport(importId);
-                rememberImportDetails(details);
-                runOnClient(() -> {
+                persistImportDetails(localPath, details);
+                runOnClient(request, () -> {
+                    if (localPath != null) reloadHistoryAt(localPath, true);
                     updateButtonStates();
                     status = details.hasCreatedArt()
                         ? "Импорт привязан к сохраненному арту."
@@ -470,9 +507,9 @@ public final class ScanScreen extends Screen {
                 });
             } catch (Exception e) {
                 if (CompanionAuthSupport.isAuthFailure(e)) {
-                    expireSessionLocally(CompanionAuthSupport.expiredMessage());
+                    expireSessionLocally(request, CompanionAuthSupport.expiredMessage());
                 } else {
-                    runOnClient(() -> status = CompanionUiErrors.message("sync", e));
+                    runOnClient(request, () -> status = CompanionUiErrors.message("sync", e));
                 }
             }
         });
@@ -480,10 +517,11 @@ public final class ScanScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+        MapKlussUi.drawBackdrop(context, width, height);
         int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
         boolean sideRail = sideRailLayout(panelWidth, left);
-        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 10, MapKlussUi.panelBottom(height));
+        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 46, MapKlussUi.panelBottom(height));
         if (sideRail) {
             int railLeft = sideRailLeft(panelWidth, left);
             MapKlussUi.drawPanelAt(context, railLeft - 8, railLeft + SIDE_RAIL_WIDTH + 8, 46, MapKlussUi.panelBottom(height));
@@ -615,15 +653,18 @@ public final class ScanScreen extends Screen {
         historyIndex = 0;
     }
 
-    private ScanHistoryEntry attachUploadToHistory(ScanUploadResponse response) throws Exception {
-        if (draft == null) return null;
-        Path output = currentDraftLocalPath();
+    private ScanHistoryEntry attachUploadToHistory(
+        ScanUploadResponse response,
+        MapScanDraft requestedDraft,
+        Path output
+    ) throws Exception {
+        if (requestedDraft == null || output == null) return null;
         if (!Files.exists(output)) {
             Files.createDirectories(output.getParent());
-            Files.write(output, draft.pngBytes());
+            Files.write(output, requestedDraft.pngBytes());
         }
         ScanHistoryStore store = ScanHistoryStore.load(LitematicaPaths.scanHistoryPath(client().gameDirectory.toPath()));
-        return store.attachUpload(output.toString(), response);
+        return store.rememberUpload(requestedDraft, output, response);
     }
 
     private void loadHistory() {
@@ -676,18 +717,29 @@ public final class ScanScreen extends Screen {
     }
 
     private String activeImportId() {
-        if (upload != null && upload.importId() != null && !upload.importId().isBlank()) return upload.importId();
-        ScanHistoryEntry entry = selectedHistoryEntry();
-        if (entry != null) {
-            String importId = entry.importId();
-            if (importId != null && !importId.isBlank()) return importId;
-        }
-        return null;
+        ActiveScanTarget target = activeTarget();
+        return target == null ? null : target.importId();
     }
 
     private ScanHistoryEntry selectedHistoryEntry() {
         if (history.isEmpty() || historyIndex < 0 || historyIndex >= history.size()) return null;
         return history.get(historyIndex);
+    }
+
+    private ActiveScanTarget activeTarget() {
+        ScanHistoryEntry entry = selectedHistoryEntry();
+        if (entry != null) {
+            String importId = entry.importId();
+            return new ActiveScanTarget(
+                importId == null || importId.isBlank() ? null : importId,
+                entry.localPath(),
+                entry.title() == null || entry.title().isBlank() ? "Сканированный арт" : entry.title()
+            );
+        }
+        if (draft == null) return null;
+        String importId = upload == null || upload.importId() == null || upload.importId().isBlank()
+            ? null : upload.importId();
+        return new ActiveScanTarget(importId, currentDraftLocalPath().toString(), draft.title());
     }
 
     private void updateButtonStates() {
@@ -698,7 +750,7 @@ public final class ScanScreen extends Screen {
         boolean hasCreatedArt = entry != null && entry.hasCreatedArt();
 
         if (savePngButton != null) savePngButton.active = hasDraft;
-        if (uploadButton != null) uploadButton.active = hasDraft;
+        if (uploadButton != null) uploadButton.active = hasDraft && !uploadInFlight.get();
         if (refreshImportButton != null) refreshImportButton.active = hasImport;
         if (loadButton != null) loadButton.active = hasHistoryEntry;
         if (deleteButton != null) deleteButton.active = hasHistoryEntry;
@@ -708,14 +760,24 @@ public final class ScanScreen extends Screen {
         if (cloudButton != null) cloudButton.active = hasImport || hasCreatedArt;
     }
 
-    private void rememberImportDetails(ScanImportDetails details) throws Exception {
-        if (details == null || details.importId() == null || details.importId().isBlank()) return;
-        if (history.isEmpty() || historyIndex < 0 || historyIndex >= history.size()) return;
-        ScanHistoryEntry entry = history.get(historyIndex);
+    private void persistImportDetails(String localPath, ScanImportDetails details) throws Exception {
+        if (localPath == null || localPath.isBlank() || details == null
+            || details.importId() == null || details.importId().isBlank()) return;
         ScanHistoryStore store = ScanHistoryStore.load(LitematicaPaths.scanHistoryPath(client().gameDirectory.toPath()));
-        store.attachImportDetails(entry.localPath(), details);
+        store.attachImportDetails(localPath, details);
+    }
+
+    private void reloadHistoryAt(String localPath, boolean selectRequested) {
         loadHistory();
-        runOnClient(this::updateButtonStates);
+        if (selectRequested && localPath != null) {
+            for (int index = 0; index < history.size(); index++) {
+                if (localPath.equals(history.get(index).localPath())) {
+                    historyIndex = index;
+                    break;
+                }
+            }
+        }
+        updateButtonStates();
     }
 
     private void deleteSelectedHistory() {
@@ -901,12 +963,21 @@ public final class ScanScreen extends Screen {
         client().execute(task);
     }
 
-    private void expireSessionLocally(String nextStatus) {
+    private void runOnClient(ScreenRequestGate.Token request, Runnable task) {
+        client().execute(() -> {
+            if (requests.isCurrent(request) && client().gui.screen() == this) task.run();
+        });
+    }
+
+    private void expireSessionLocally(ScreenRequestGate.Token request, String nextStatus) {
         try {
             CompanionRuntime runtime = CompanionRuntime.create(client());
             CompanionAuthSupport.clearSessionQuietly(runtime);
         } catch (Exception ignored) {
         }
-        runOnClient(() -> status = nextStatus);
+        runOnClient(request, () -> status = nextStatus);
+    }
+
+    private record ActiveScanTarget(String importId, String localPath, String title) {
     }
 }

@@ -15,12 +15,11 @@ final class LensFrameTarget {
     static Target capture(Minecraft client) throws IOException {
         if (client.level == null || client.player == null || client.hitResult == null
             || client.hitResult.getType() != HitResult.Type.ENTITY) {
-            throw new IOException("Look at the left-bottom item frame.");
+            throw new IOException("Look at the first item frame of the art.");
         }
         Entity entity = ((EntityHitResult) client.hitResult).getEntity();
-        if (!(entity instanceof ItemFrame frame)) throw new IOException("Look at the left-bottom item frame.");
+        if (!(entity instanceof ItemFrame frame)) throw new IOException("Look at the first item frame of the art.");
         Direction facing = frame.getDirection();
-        if (!facing.getAxis().isHorizontal()) throw new IOException("Lens supports vertical frame walls only.");
         return new Target(frame.getPos(), facing);
     }
 

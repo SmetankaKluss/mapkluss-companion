@@ -14,9 +14,11 @@ import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class TrackerSessionScreen extends Screen {
+    private static final int PANEL_WIDTH = 1120;
+    private static final Map<String, SerialLatestQueue<TrackerMutation>> SESSION_MUTATIONS = new ConcurrentHashMap<>();
     private static final int MATERIAL_ROWS = 12;
     private static final int MATERIAL_Y = 168;
     private static final int MATERIAL_RENDER_Y = 172;
@@ -46,80 +48,59 @@ public final class TrackerSessionScreen extends Screen {
     private AbstractWidget hideDoneButton;
     private EditBox searchInput;
     private final List<ProgressInput> progressInputs = new ArrayList<>();
+    private final ScreenRequestGate requests = new ScreenRequestGate();
+    private final SerialLatestQueue<TrackerMutation> mutations;
 
     public TrackerSessionScreen(Screen parent, String sessionId) {
         super(Component.literal("Трекер MapKluss"));
         this.parent = parent;
         this.sessionId = sessionId;
+        this.mutations = SESSION_MUTATIONS.computeIfAbsent(sessionId, ignored ->
+            new SerialLatestQueue<>(mutation -> mutation.owner().performMutation(mutation), TrackerMutation::replacementKey)
+        );
     }
 
     @Override
     protected void init() {
+        requests.attach();
         clearWidgets();
         rebuildLayout();
         load();
+    }
+
+    @Override
+    public void removed() {
+        requests.detach();
+        super.removed();
     }
 
     private void load() {
         loadFailed = false;
         status = "Загрузка трекера...";
         rebuildLayout();
-        CompletableFuture.runAsync(() -> {
-            try {
-                CompanionRuntime runtime = CompanionRuntime.create(client());
-                BuildSessionState loaded = runtime.syncService().tracker(sessionId);
-                rememberTrackerHistory(runtime, loaded);
-                runOnClient(() -> {
-                    session = loaded;
-                    loadFailed = false;
-                    scrollOffset = clampScrollOffset(scrollOffset, loaded);
-                    status = "";
-                    rebuildLayout();
-                });
-            } catch (Exception e) {
-                if (CompanionAuthSupport.isAuthFailure(e)) {
-                    expireSessionLocally(CompanionAuthSupport.expiredMessage());
-                } else {
-                    runOnClient(() -> {
-                        session = null;
-                        loadFailed = true;
-                        status = CompanionUiErrors.message("tracker", e);
-                        rebuildLayout();
-                    });
-                }
-            }
-        });
+        ScreenRequestGate.Token request = requests.begin("load");
+        mutations.submit(TrackerMutation.load(this, request));
     }
 
     private void switchMode(String mode) {
+        if (session == null) return;
+        BuildSessionState updated = session.withMode(mode);
+        if (updated == session) {
+            status = "Этот режим уже выбран.";
+            return;
+        }
+        previousSession = session;
+        session = updated;
         status = "Переключение режима...";
-        CompletableFuture.runAsync(() -> {
-            try {
-                CompanionRuntime runtime = CompanionRuntime.create(client());
-                runtime.apiClient().switchTrackerMode(sessionId, mode);
-                BuildSessionState loaded = runtime.syncService().tracker(sessionId);
-                rememberTrackerHistory(runtime, loaded);
-                runOnClient(() -> {
-                    session = loaded;
-                    scrollOffset = clampScrollOffset(scrollOffset, loaded);
-                    status = "Режим: " + readableMode(mode);
-                    rebuildLayout();
-                });
-            } catch (Exception e) {
-                if (CompanionAuthSupport.isAuthFailure(e)) {
-                    expireSessionLocally(CompanionAuthSupport.expiredMessage());
-                } else {
-                    runOnClient(() -> status = CompanionUiErrors.message("sync", e));
-                }
-            }
-        });
+        rebuildLayout();
+        mutations.submit(TrackerMutation.mode(this, requests.begin("tracker-sync"), mode));
     }
 
     private void rebuildLayout() {
         clearWidgets();
         progressInputs.clear();
         scrollOffset = clampScrollOffset(scrollOffset, session);
-        int panelWidth = MapKlussUi.panelWidth(width, 420);
+        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
         int gap = 4;
         addRenderableWidget(MapKlussUi.languageButton(this));
@@ -162,11 +143,11 @@ public final class TrackerSessionScreen extends Screen {
         int row1 = actionTop();
         int row2 = row1 + ACTION_ROW_HEIGHT;
         addRenderableWidget(MapKlussButton.builder(Component.literal("Сайт"), button -> openTrackerSite())
-            .dimensions(left, row1, threeButtonWidth, 20).build());
+            .technical().dimensions(left, row1, threeButtonWidth, 20).build());
         addRenderableWidget(MapKlussButton.builder(Component.literal("Обновить"), button -> load())
-            .dimensions(left + threeButtonWidth + gap, row1, threeButtonWidth, 20).build());
+            .technical().dimensions(left + threeButtonWidth + gap, row1, threeButtonWidth, 20).build());
         artButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Арт"), button -> openRelatedArt())
-            .dimensions(left + (threeButtonWidth + gap) * 2, row1, panelWidth - (threeButtonWidth + gap) * 2, 20).build());
+            .special().dimensions(left + (threeButtonWidth + gap) * 2, row1, panelWidth - (threeButtonWidth + gap) * 2, 20).build());
 
         addRenderableWidget(MapKlussButton.builder(Component.literal("Сбор"), button -> switchMode("gathering"))
             .selected(session == null || !"building".equals(session.mode()))
@@ -188,11 +169,11 @@ public final class TrackerSessionScreen extends Screen {
         int x = sideRailLeft(panelWidth, left);
         int buttonWidth = SIDE_RAIL_WIDTH;
         addRenderableWidget(MapKlussButton.builder(Component.literal("Сайт"), button -> openTrackerSite())
-            .dimensions(x, 80, buttonWidth, 20).build());
+            .technical().dimensions(x, 80, buttonWidth, 20).build());
         addRenderableWidget(MapKlussButton.builder(Component.literal("Обновить"), button -> load())
-            .dimensions(x, 106, buttonWidth, 20).build());
+            .technical().dimensions(x, 106, buttonWidth, 20).build());
         artButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Арт"), button -> openRelatedArt())
-            .dimensions(x, 132, buttonWidth, 20).build());
+            .special().dimensions(x, 132, buttonWidth, 20).build());
 
         addRenderableWidget(MapKlussButton.builder(Component.literal("Сбор"), button -> switchMode("gathering"))
             .selected(session == null || !"building".equals(session.mode()))
@@ -209,7 +190,7 @@ public final class TrackerSessionScreen extends Screen {
 
     private void rebuildMaterialButtons() {
         if (session == null || session.materials() == null) return;
-        int panelWidth = MapKlussUi.panelWidth(width, 420);
+        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
         int gap = 4;
         int actionsWidth = 44 + 28 + 38 + 38 + 24 + 36 + gap * 5;
@@ -297,43 +278,72 @@ public final class TrackerSessionScreen extends Screen {
             return;
         }
         BuildSessionState restore = previousSession;
-        previousSession = session;
+        BuildSessionState current = session;
+        previousSession = current;
         session = restore;
         status = "Отмена последнего изменения...";
-        syncSession(restore);
+        rebuildLayout();
+        if (!java.util.Objects.equals(current.mode(), restore.mode())) {
+            mutations.submit(TrackerMutation.combined(this, requests.begin("tracker-sync"), restore.mode(), restore));
+        } else {
+            syncSession(restore);
+        }
     }
 
     private void syncSession(BuildSessionState nextSession) {
-        CompletableFuture.runAsync(() -> {
-            try {
-                CompanionRuntime runtime = CompanionRuntime.create(client());
-                JsonObject gathered = "building".equals(nextSession.mode()) ? null : toJson(nextSession.gathered());
-                JsonObject placed = "building".equals(nextSession.mode()) ? toJson(nextSession.placed()) : null;
+        mutations.submit(TrackerMutation.progress(this, requests.begin("tracker-sync"), nextSession));
+    }
+
+    private void performMutation(TrackerMutation mutation) {
+        try {
+            CompanionRuntime runtime = CompanionRuntime.create(client());
+            if (!mutation.loadOnly() && mutation.mode() != null) {
+                runtime.apiClient().switchTrackerMode(sessionId, mutation.mode());
+            }
+            if (!mutation.loadOnly() && mutation.session() != null) {
+                BuildSessionState snapshot = mutation.session();
+                JsonObject gathered = "building".equals(snapshot.mode()) ? null : toJson(snapshot.gathered());
+                JsonObject placed = "building".equals(snapshot.mode()) ? toJson(snapshot.placed()) : null;
                 runtime.apiClient().updateTracker(sessionId, gathered, placed);
-                BuildSessionState loaded = runtime.syncService().tracker(sessionId);
+            }
+            BuildSessionState loaded = runtime.syncService().tracker(sessionId);
+            try {
                 rememberTrackerHistory(runtime, loaded);
-                runOnClient(() -> {
-                    session = loaded;
-                    scrollOffset = clampScrollOffset(scrollOffset, loaded);
-                    status = "Синхронизировано.";
+            } catch (Exception cacheError) {
+                MapKlussCompanionClient.LOGGER.debug("Could not cache tracker history.", cacheError);
+            }
+            runOnClient(mutation.request(), () -> {
+                loadFailed = false;
+                session = loaded;
+                scrollOffset = clampScrollOffset(scrollOffset, loaded);
+                status = mutation.loadOnly()
+                    ? ""
+                    : mutation.mode() == null ? "Синхронизировано." : "Режим: " + readableMode(loaded.mode());
+                rebuildLayout();
+            });
+        } catch (Exception error) {
+            if (CompanionAuthSupport.isAuthFailure(error)) {
+                expireSessionLocally(mutation.request(), CompanionAuthSupport.expiredMessage());
+            } else {
+                runOnClient(mutation.request(), () -> {
+                    if (mutation.loadOnly()) {
+                        session = null;
+                        loadFailed = true;
+                    }
+                    status = CompanionUiErrors.message(mutation.loadOnly() ? "tracker" : "sync", error);
                     rebuildLayout();
                 });
-            } catch (Exception e) {
-                if (CompanionAuthSupport.isAuthFailure(e)) {
-                    expireSessionLocally(CompanionAuthSupport.expiredMessage());
-                } else {
-                    runOnClient(() -> status = CompanionUiErrors.message("sync", e));
-                }
             }
-        });
+        }
     }
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
-        int panelWidth = MapKlussUi.panelWidth(width, 420);
+        MapKlussUi.drawBackdrop(context, width, height);
+        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
         boolean sideRail = sideRailLayout(panelWidth, left);
-        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 12, MapKlussUi.panelBottom(height));
+        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 46, MapKlussUi.panelBottom(height));
         if (sideRail && !loadFailed) {
             int railLeft = sideRailLeft(panelWidth, left);
             MapKlussUi.drawPanelAt(context, railLeft - 8, railLeft + SIDE_RAIL_WIDTH + 8, 46, MapKlussUi.panelBottom(height));
@@ -404,7 +414,7 @@ public final class TrackerSessionScreen extends Screen {
     }
 
     private void drawActionGroups(GuiGraphicsExtractor context) {
-        int panelWidth = MapKlussUi.panelWidth(width, 420);
+        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
         int row1 = actionTop();
         int row2 = row1 + ACTION_ROW_HEIGHT;
@@ -571,7 +581,7 @@ public final class TrackerSessionScreen extends Screen {
     }
 
     private boolean isOverMaterialTable(double mouseX, double mouseY) {
-        int panelWidth = MapKlussUi.panelWidth(width, 420);
+        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
         return mouseX >= left - 6
             && mouseX <= left + panelWidth + 6
@@ -580,13 +590,13 @@ public final class TrackerSessionScreen extends Screen {
     }
 
     private int materialTableBottomY() {
-        int panelWidth = MapKlussUi.panelWidth(width, 420);
+        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
         return sideRailLayout(panelWidth, left) ? height - 24 : actionTop() - 18;
     }
 
     private boolean sideRailLayout(int panelWidth, int left) {
-        return height >= 360 && MapKlussUi.rightRailFits(width, panelWidth, SIDE_RAIL_WIDTH, SIDE_RAIL_GAP);
+        return false;
     }
 
     private int sideRailLeft(int panelWidth, int left) {
@@ -594,7 +604,7 @@ public final class TrackerSessionScreen extends Screen {
     }
 
     private int screenLeft(int panelWidth) {
-        return MapKlussUi.leftWithRightRail(width, panelWidth, SIDE_RAIL_WIDTH, SIDE_RAIL_GAP);
+        return MapKlussUi.centeredLeft(width, panelWidth);
     }
 
     private boolean scrollMaterials(double verticalAmount) {
@@ -689,13 +699,53 @@ public final class TrackerSessionScreen extends Screen {
         client().execute(task);
     }
 
-    private void expireSessionLocally(String nextStatus) {
+    private void runOnClient(ScreenRequestGate.Token request, Runnable task) {
+        client().execute(() -> {
+            if (requests.isCurrent(request) && client().gui.screen() == this) task.run();
+        });
+    }
+
+    private void expireSessionLocally(ScreenRequestGate.Token request, String nextStatus) {
         try {
             CompanionRuntime runtime = CompanionRuntime.create(client());
             CompanionAuthSupport.clearSessionQuietly(runtime);
         } catch (Exception ignored) {
         }
-        runOnClient(() -> status = nextStatus);
+        runOnClient(request, () -> status = nextStatus);
+    }
+
+    private record TrackerMutation(
+        TrackerSessionScreen owner,
+        ScreenRequestGate.Token request,
+        String mode,
+        BuildSessionState session,
+        boolean loadOnly,
+        String replacementKey
+    ) {
+        private static TrackerMutation load(TrackerSessionScreen owner, ScreenRequestGate.Token request) {
+            return new TrackerMutation(owner, request, null, null, true, "load");
+        }
+
+        private static TrackerMutation mode(TrackerSessionScreen owner, ScreenRequestGate.Token request, String mode) {
+            return new TrackerMutation(owner, request, mode, null, false, null);
+        }
+
+        private static TrackerMutation progress(
+            TrackerSessionScreen owner,
+            ScreenRequestGate.Token request,
+            BuildSessionState session
+        ) {
+            return new TrackerMutation(owner, request, null, session, false, "progress");
+        }
+
+        private static TrackerMutation combined(
+            TrackerSessionScreen owner,
+            ScreenRequestGate.Token request,
+            String mode,
+            BuildSessionState session
+        ) {
+            return new TrackerMutation(owner, request, mode, session, false, null);
+        }
     }
 
     private record ProgressInput(BuildSessionMaterial material, EditBox widget) {

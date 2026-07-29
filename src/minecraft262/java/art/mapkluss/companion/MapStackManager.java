@@ -37,6 +37,8 @@ public final class MapStackManager {
     private Object activeWorld;
     private AbstractContainerMenu handler;
     private Preload preload;
+    private AbstractContainerMenu recognitionHandler;
+    private boolean recognitionRequested;
     private int scanTicks;
     private boolean dirty = true;
 
@@ -55,6 +57,8 @@ public final class MapStackManager {
             validatedMapIds.clear();
             failedMapIds.clear();
             updatedMapIds.clear();
+            recognitionHandler = null;
+            recognitionRequested = false;
             dirty = true;
         }
         String nextConnection = client.level == null ? "" : AutoFrameManager.instance().connectionKey(client);
@@ -65,12 +69,16 @@ public final class MapStackManager {
             failedMapIds.clear();
             updatedMapIds.clear();
             handler = null;
+            recognitionHandler = null;
+            recognitionRequested = false;
             decorations = Map.of();
             dirty = true;
         }
         if (client.player == null || client.level == null || client.gameMode == null) {
             cancelPreload(client, true);
             handler = null;
+            recognitionHandler = null;
+            recognitionRequested = false;
             decorations = Map.of();
             return;
         }
@@ -88,7 +96,17 @@ public final class MapStackManager {
             scanTicks = SCAN_INTERVAL_TICKS;
             dirty = false;
         }
-        if (preload == null && client.gui.screen() instanceof AbstractContainerScreen<?>) beginPreload(client, nextHandler);
+        boolean handledScreenOpen = client.gui.screen() instanceof AbstractContainerScreen<?>;
+        if (recognitionRequested) {
+            if (!handledScreenOpen || recognitionHandler != nextHandler) {
+                recognitionHandler = null;
+                recognitionRequested = false;
+                AutoFrameManager.instance().showStatus("Распознавание карт отменено");
+            } else if (preload == null) {
+                beginPreload(client, nextHandler);
+                if (preload == null) finishRecognition(client, nextHandler);
+            }
+        }
     }
 
     public synchronized void onMapUpdate(int mapId) {
@@ -98,10 +116,26 @@ public final class MapStackManager {
         }
     }
 
+    public synchronized void requestRecognition(Minecraft client, AbstractContainerMenu currentHandler) {
+        initialize(client);
+        if (client.player == null || client.level == null || currentHandler == null
+            || client.player.containerMenu != currentHandler) {
+            AutoFrameManager.instance().showStatus("Откройте инвентарь или хранилище с картами");
+            return;
+        }
+        recognitionHandler = currentHandler;
+        recognitionRequested = true;
+        failedMapIds.clear();
+        dirty = true;
+        AutoFrameManager.instance().showStatus("Загружаю и распознаю карты…");
+    }
+
     public synchronized void onScreenRemoved(Minecraft client, AbstractContainerMenu closingHandler) {
         if (handler == closingHandler) {
             cancelPreload(client, true);
             handler = null;
+            recognitionHandler = null;
+            recognitionRequested = false;
             decorations = Map.of();
             dirty = true;
         }
@@ -151,6 +185,42 @@ public final class MapStackManager {
             ));
         }
         decorations = Map.copyOf(next);
+    }
+
+    private void finishRecognition(Minecraft client, AbstractContainerMenu currentHandler) {
+        recognitionHandler = null;
+        recognitionRequested = false;
+        scan(client, currentHandler);
+
+        Set<Integer> mapIds = new HashSet<>();
+        List<MapArtLayoutSolver.Tile> tiles = new ArrayList<>();
+        for (Slot slot : currentHandler.slots) {
+            ItemStack stack = slot.getItem();
+            Integer mapId = MapArtTiles.mapId(stack);
+            if (mapId == null || !mapIds.add(mapId)) continue;
+            MapArtTiles.fromStack(client, stack).ifPresent(tiles::add);
+        }
+        if (mapIds.isEmpty()) {
+            AutoFrameManager.instance().showStatus("В открытых слотах нет заполненных карт");
+            return;
+        }
+        if (tiles.size() != mapIds.size()) {
+            AutoFrameManager.instance().showStatus("Не все карты загрузились. Повторите распознавание");
+            return;
+        }
+
+        List<MapArtLayoutSolver.Tile> unknown = tiles.stream()
+            .filter(tile -> !decorations.containsKey(tile.mapId()))
+            .toList();
+        if (unknown.isEmpty()) {
+            AutoFrameManager.instance().showStatus("Распознано карт: " + decorations.size());
+            return;
+        }
+        if (AutoFrameManager.instance().inferAndRememberVisibleMaps(client, unknown).isPresent()) {
+            scan(client, currentHandler);
+            AutoFrameManager.instance().showStatus("Распознано карт: " + decorations.size());
+        }
+        dirty = true;
     }
 
     private Optional<MapPreviewStore.Entry> livePreview(
@@ -219,8 +289,9 @@ public final class MapStackManager {
             if (validatedMapIds.contains(mapId) || failedMapIds.contains(mapId)
                 || livePreview(client, sourceStack, mapId, connectionKey).isPresent()) continue;
             ItemStack hotbarStack = hotbar.getItem();
-            if (!source.mayPickup(client.player) || !hotbar.mayPickup(client.player)
-                || !hotbar.mayPlace(sourceStack) || (!hotbarStack.isEmpty() && !source.mayPlace(hotbarStack))) continue;
+            if (!source.mayPickup(client.player) || !source.mayPlace(sourceStack)
+                || !hotbar.mayPickup(client.player) || !hotbar.mayPlace(sourceStack)
+                || (!hotbarStack.isEmpty() && !source.mayPlace(hotbarStack))) continue;
             preload = new Preload(
                 currentHandler,
                 source.index,
@@ -258,7 +329,7 @@ public final class MapStackManager {
                 dirty = true;
                 return;
             }
-        } else if (preload.mapId().equals(MapArtTiles.mapId(hotbar.getItem()))
+        } else if (ItemStack.matches(hotbar.getItem(), preload.sourceBefore())
             && ItemStack.matches(source.getItem(), preload.hotbarBefore())) {
             if (livePreview(client, hotbar.getItem(), preload.mapId(), connectionKey).isPresent()) {
                 restorePreload(client, source, hotbar);
@@ -291,7 +362,7 @@ public final class MapStackManager {
     private void restorePreload(Minecraft client, Slot source, Slot hotbar) {
         if (preload == null || preload.restoring()) return;
         if (ItemStack.matches(source.getItem(), preload.hotbarBefore())
-            && preload.mapId().equals(MapArtTiles.mapId(hotbar.getItem()))) {
+            && ItemStack.matches(hotbar.getItem(), preload.sourceBefore())) {
             client.gameMode.handleContainerInput(
                 preload.handler().containerId,
                 preload.sourceSlotId(),

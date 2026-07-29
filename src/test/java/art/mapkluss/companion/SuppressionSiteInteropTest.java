@@ -16,6 +16,7 @@ final class SuppressionSiteInteropTest {
             Path zip = fixtureDir.resolve("site-v3-" + minecraftVersion + ".zip");
             SuppressionBundle bundle = SuppressionBundleReader.read(zip);
             SuppressionPlan plan = bundle.parsed().plan();
+            SuppressionReferenceLitematic.validateSource(plan, bundle.litematicBytes());
 
             assertEquals(3, plan.version());
             assertEquals(minecraftVersion, plan.target().minecraftVersion());
@@ -45,6 +46,9 @@ final class SuppressionSiteInteropTest {
             assertEquals(offset / 2, tile.row());
             assertEquals(3, tile.bundle().parsed().plan().version());
             assertEquals("1.21.11", tile.bundle().parsed().plan().target().minecraftVersion());
+            SuppressionReferenceLitematic.validateSource(
+                tile.bundle().parsed().plan(), tile.bundle().litematicBytes()
+            );
         }
     }
 

@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class TrackerOpenScreen extends Screen {
-    private static final int PANEL_WIDTH = 420;
+    private static final int PANEL_WIDTH = 1120;
     private static final int INPUT_Y = 78;
     private static final int HISTORY_Y = 136;
     private static final int HISTORY_ROW_HEIGHT = 23;
@@ -71,6 +71,7 @@ public final class TrackerOpenScreen extends Screen {
                 .tooltip(Text.literal(label))
                 .dimensions(left, rowY, panelWidth - artWidth - gap, 20).build());
             addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Арт"), button -> openHistoryArt(entry))
+                .special()
                 .tooltip(CompanionI18n.text("Открыть связанный арт"))
                 .dimensions(left + panelWidth - artWidth, rowY, artWidth, 20)
                 .enabledWhen(() -> entry.artId() != null && !entry.artId().isBlank()).build());
@@ -129,13 +130,18 @@ public final class TrackerOpenScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        MapKlussUi.drawBackdrop(context, width, height);
         int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = MapKlussUi.centeredLeft(width, panelWidth);
-        MapKlussUi.drawPanel(context, width, PANEL_WIDTH, 14, MapKlussUi.panelBottom(height));
+        MapKlussUi.drawPanel(context, width, PANEL_WIDTH, 46, MapKlussUi.panelBottom(height));
+        MapKlussUi.drawSectionAt(context, textRenderer, null, left, panelWidth, INPUT_Y - 14, 38);
+        int historyTop = HISTORY_Y - 24;
+        int historyBottom = Math.min(MapKlussUi.panelBottom(height) - 4, MapKlussUi.contentBottom(height));
+        MapKlussUi.drawSectionAt(context, textRenderer, "Недавние сессии",
+            left, panelWidth, historyTop, Math.max(0, historyBottom - historyTop));
         MapKlussUi.drawHeader(context, textRenderer, title.getString(), "", width, 20);
         MapKlussUi.drawStatusIn(context, textRenderer, status, left + panelWidth / 2, 38, panelWidth - 20);
         MapKlussUi.drawFieldLabel(context, textRenderer, "UUID сборки", left, INPUT_Y, panelWidth);
-        MapKlussUi.drawLeft(context, textRenderer, "Недавние сессии трекера", left + 2, 116, panelWidth - 92, MapKlussUi.ACCENT);
         if (history.isEmpty()) {
             MapKlussUi.drawEmptyState(context, textRenderer, "Недавних сессий пока нет", "", left, HISTORY_Y, panelWidth, Math.max(42, height - HISTORY_Y - 50));
         }

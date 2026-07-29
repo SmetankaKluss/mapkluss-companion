@@ -5,6 +5,7 @@ import com.google.gson.Gson;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,11 +34,14 @@ public final class SuppressionBundleReader {
     }
 
     public static SuppressionBundleCatalog readCatalog(Path path) throws IOException {
-        long size = Files.size(path);
-        if (size < 1 || size > SuppressionPlanParser.MAX_BUNDLE_BYTES) {
+        byte[] bytes;
+        try (InputStream input = Files.newInputStream(path)) {
+            bytes = CompanionApiClient.readBounded(input, SuppressionPlanParser.MAX_BUNDLE_BYTES);
+        }
+        if (bytes.length < 1) {
             throw new IOException("Two-layer ZIP size is outside the safe limit");
         }
-        return readCatalog(Files.readAllBytes(path), path.getFileName().toString());
+        return readCatalog(bytes, path.getFileName().toString());
     }
 
     static SuppressionBundle read(byte[] zipBytes, String sourceName) throws IOException {

@@ -15,6 +15,27 @@ final class ManifestCacheTest {
     Path tempDir;
 
     @Test
+    void independentlyLoadedCachesMergeDifferentArts() throws Exception {
+        Path cachePath = tempDir.resolve("shared-manifest-cache.json");
+        ManifestCache first = ManifestCache.load(cachePath);
+        ManifestCache second = ManifestCache.load(cachePath);
+        first.write("user-1", manifest("art-1", "First"));
+        second.write("user-1", manifest("art-2", "Second"));
+
+        ManifestCache merged = ManifestCache.load(cachePath);
+        assertEquals("First", merged.read("user-1", "art-1").orElseThrow().manifest().title());
+        assertEquals("Second", merged.read("user-1", "art-2").orElseThrow().manifest().title());
+    }
+
+    private static CompanionManifest manifest(String id, String title) {
+        return new CompanionManifest(
+            id, "version-1", "owner-1", title, "unlisted", new CompanionManifest.Grid(1, 1),
+            "classic", "1.21.11", "standard", null, false, List.of(), List.of(),
+            "2026-07-24T00:00:00Z"
+        );
+    }
+
+    @Test
     void savesAndReloadsManifest() throws Exception {
         Path cachePath = tempDir.resolve("manifest-cache.json");
         ManifestCache cache = ManifestCache.load(cachePath);

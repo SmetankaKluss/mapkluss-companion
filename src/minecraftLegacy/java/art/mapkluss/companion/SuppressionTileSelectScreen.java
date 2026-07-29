@@ -18,6 +18,7 @@ public final class SuppressionTileSelectScreen extends Screen {
     private int page;
     private boolean busy;
     private String status = "";
+    private final ScreenRequestGate requests = new ScreenRequestGate();
 
     public SuppressionTileSelectScreen(Screen parent, SuppressionBundleCatalog catalog) {
         super(Text.literal("Two-layer maps"));
@@ -27,6 +28,7 @@ public final class SuppressionTileSelectScreen extends Screen {
 
     @Override
     protected void init() {
+        requests.attach();
         clearChildren();
         int panelWidth = MapKlussUi.panelWidth(width, DESIRED_PANEL_WIDTH);
         int left = MapKlussUi.centeredLeft(width, panelWidth);
@@ -45,7 +47,7 @@ public final class SuppressionTileSelectScreen extends Screen {
             int x = left + (local % columns) * (buttonWidth + GAP);
             int y = gridTop + (local / columns) * (BUTTON_HEIGHT + GAP);
             addDrawableChild(MapKlussButton.builder(tileLabel(tile), button -> startTile(tile))
-                .gold()
+                .special()
                 .tooltip(CompanionI18n.text("Строка " + (tile.row() + 1) + ", столбец " + (tile.column() + 1)))
                 .dimensions(x, y, buttonWidth, BUTTON_HEIGHT)
                 .enabledWhen(() -> !busy && !SuppressionManager.instance().active())
@@ -78,11 +80,12 @@ public final class SuppressionTileSelectScreen extends Screen {
         if (busy || SuppressionManager.instance().active()) return;
         busy = true;
         status = "Подготовка карты " + tile.index() + "…";
+        ScreenRequestGate.Token token = requests.begin("two-layer-start");
         CompletableFuture.runAsync(() -> {
             try {
                 SuppressionBundleInstaller.Installed installed = SuppressionBundleInstaller.install(
                     client().runDirectory.toPath(), tile.bundle());
-                client().execute(() -> {
+                runOnClient(token, () -> {
                     try {
                         SuppressionManager.instance().start(client(), tile.bundle(), installed);
                         client().setScreen(null);
@@ -93,7 +96,7 @@ public final class SuppressionTileSelectScreen extends Screen {
                 });
             } catch (Exception error) {
                 MapKlussCompanionClient.LOGGER.warn("Could not start Two-layer map part {}.", tile.index(), error);
-                client().execute(() -> {
+                runOnClient(token, () -> {
                     busy = false;
                     status = "Не удалось подготовить карту: " + CompanionUiErrors.message("two-layer", error);
                 });
@@ -103,11 +106,17 @@ public final class SuppressionTileSelectScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        MapKlussUi.drawBackdrop(context, width, height);
         int panelWidth = MapKlussUi.panelWidth(width, DESIRED_PANEL_WIDTH);
         int left = MapKlussUi.centeredLeft(width, panelWidth);
         int bottom = panelBottom();
         MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, panelTop(), bottom);
-        MapKlussUi.drawHeader(context, textRenderer, "ВЫБЕРИТЕ КАРТУ", "", width, panelTop() + 12);
+        MapKlussUi.drawSectionAt(context, textRenderer, "Части арта", left, panelWidth,
+            gridTop() - 16, Math.max(42, bottom - gridTop() - 30));
+        MapKlussUi.drawLocalHeader(
+            context, textRenderer, "ВЫБЕРИТЕ КАРТУ", "",
+            left - 4, left + panelWidth + 4, panelTop() + 12
+        );
         MapKlussUi.drawCenteredIn(
             context, textRenderer,
             catalog.gridWide() + "×" + catalog.gridTall() + " · " + catalog.tiles().size() + " карт",
@@ -127,6 +136,18 @@ public final class SuppressionTileSelectScreen extends Screen {
     @Override
     public void close() {
         if (!busy) client().setScreen(parent);
+    }
+
+    @Override
+    public void removed() {
+        requests.detach();
+        super.removed();
+    }
+
+    private void runOnClient(ScreenRequestGate.Token token, Runnable task) {
+        client().execute(() -> {
+            if (requests.isCurrent(token) && client().currentScreen == this) task.run();
+        });
     }
 
     private Text tileLabel(SuppressionBundleCatalog.Tile tile) {

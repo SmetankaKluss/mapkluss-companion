@@ -46,4 +46,19 @@ final class CompanionSessionStoreTest {
         assertEquals("user-abc...", info.shortUserId());
         assertNotNull(info.expiresAt());
     }
+
+    @Test
+    void storesSessionWithOwnerOnlyPermissionsWhenSupported() throws Exception {
+        CompanionSessionStore store = CompanionSessionStore.load(tempDir);
+        store.saveSession("private-token", "user");
+        Path path = tempDir.resolve("config/mapkluss-companion/session.json");
+        try {
+            assertEquals(java.util.Set.of(
+                java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                java.nio.file.attribute.PosixFilePermission.OWNER_WRITE
+            ), java.nio.file.Files.getPosixFilePermissions(path));
+        } catch (UnsupportedOperationException ignored) {
+            // POSIX permissions are unavailable on this filesystem.
+        }
+    }
 }

@@ -5,7 +5,6 @@ import com.google.gson.GsonBuilder;
 
 import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -71,10 +70,7 @@ public final class CompanionSessionStore {
     }
 
     private void save() throws IOException {
-        Files.createDirectories(path.getParent());
-        try (Writer writer = Files.newBufferedWriter(path)) {
-            GSON.toJson(new StoredSession(accessToken, userId, savedAt), writer);
-        }
+        AtomicFiles.writePrivateUtf8(path, GSON.toJson(new StoredSession(accessToken, userId, savedAt)));
     }
 
     private record StoredSession(String accessToken, String userId, String savedAt) {

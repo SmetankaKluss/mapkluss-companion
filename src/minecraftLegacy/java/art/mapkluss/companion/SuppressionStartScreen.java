@@ -18,6 +18,7 @@ public final class SuppressionStartScreen extends Screen {
     private boolean busy;
     private boolean stopConfirmation;
     private MapKlussButton stopButton;
+    private final ScreenRequestGate requests = new ScreenRequestGate();
 
     public SuppressionStartScreen(Screen parent, CompanionManifest manifest) {
         super(Text.literal("Two-layer Builder"));
@@ -27,6 +28,7 @@ public final class SuppressionStartScreen extends Screen {
 
     @Override
     protected void init() {
+        requests.attach();
         clearChildren();
         SuppressionStartLayout.Layout layout = SuppressionStartLayout.calculate(width, height);
         int panelWidth = layout.panelWidth();
@@ -35,10 +37,11 @@ public final class SuppressionStartScreen extends Screen {
         int stopWidth = Math.min(112, Math.max(80, panelWidth / 3));
         int sessionWidth = panelWidth - stopWidth - 8;
         addDrawableChild(MapKlussButton.builder(Text.literal("Из облака"), button -> startCloud())
-            .gold().tooltip(CompanionI18n.text(manifest != null && manifest.hasSuppressionBundle() ? "Облачный план" : "Требуется арт с Two-layer файлами"))
+            .special().tooltip(CompanionI18n.text(manifest != null && manifest.hasSuppressionBundle() ? "Облачный план" : "Требуется арт с Two-layer файлами"))
             .dimensions(left, layout.cloudY(), buttonWidth, 20).enabledWhen(() -> !busy && !SuppressionManager.instance().active()
                 && manifest != null && manifest.hasSuppressionBundle()).build());
-        addDrawableChild(MapKlussButton.builder(Text.literal("Импорт ZIP MapKluss"), button -> chooseLocalZip())
+        addDrawableChild(MapKlussButton.builder(Text.literal("Импорт ZIP"), button -> chooseLocalZip())
+            .special()
             .dimensions(layout.splitSources() ? left + buttonWidth + 8 : left, layout.localY(), buttonWidth, 20)
             .enabledWhen(() -> !busy && !SuppressionManager.instance().active()).build());
         addDrawableChild(MapKlussButton.builder(Text.literal(sessionActionLabel()), button -> {
@@ -46,7 +49,7 @@ public final class SuppressionStartScreen extends Screen {
                 SuppressionManager.instance().handleWorldAction(client());
                 client().setScreen(null);
             })
-            .gold().dimensions(left, layout.sessionY(), sessionWidth, 20)
+            .special().dimensions(left, layout.sessionY(), sessionWidth, 20)
             .visibleWhen(() -> SuppressionManager.instance().active())
             .enabledWhen(() -> !busy).build());
         stopButton = addDrawableChild(MapKlussButton.builder(Text.literal("Остановить"), button -> stopBuilding())
@@ -54,8 +57,9 @@ public final class SuppressionStartScreen extends Screen {
             .visibleWhen(() -> SuppressionManager.instance().active())
             .enabledWhen(() -> !busy).build());
         addDrawableChild(MapKlussUi.languageButton(this));
-        int panelBottom = Math.min(layout.bottom(), MapKlussUi.panelBottom(height));
-        addDrawableChild(MapKlussUi.backButton(this, parent, left, panelBottom, () -> !busy));
+        addDrawableChild(MapKlussUi.backButton(
+            this, parent, left, layout.bottom(), () -> !busy
+        ));
     }
 
     private void startCloud() {
@@ -63,14 +67,15 @@ public final class SuppressionStartScreen extends Screen {
         resetStopConfirmation();
         busy = true;
         status = "Загрузка плана…";
+        ScreenRequestGate.Token token = requests.begin("two-layer-start");
         CompletableFuture.runAsync(() -> {
             try {
                 CompanionRuntime runtime = CompanionRuntime.create(client());
                 if (!runtime.sessionStore().hasAccessToken()) throw new java.io.IOException("Сначала войдите в MapKluss");
                 SuppressionBundleCatalog catalog = SuppressionBundleService.downloadCatalog(runtime.apiClient(), manifest);
-                client().execute(() -> openCatalog(catalog));
+                runOnClient(token, () -> openCatalog(catalog, token));
             } catch (Exception error) {
-                client().execute(() -> {
+                runOnClient(token, () -> {
                     busy = false;
                     status = "Не удалось загрузить план: " + readableError(error);
                 });
@@ -83,11 +88,12 @@ public final class SuppressionStartScreen extends Screen {
         resetStopConfirmation();
         busy = true;
         status = "Выберите ZIP из MapKluss.";
+        ScreenRequestGate.Token token = requests.begin("two-layer-start");
         CompletableFuture.runAsync(() -> {
             try {
                 String selectedPath = chooseZipPath();
                 if (selectedPath == null || selectedPath.isBlank()) {
-                    client().execute(() -> {
+                    runOnClient(token, () -> {
                         busy = false;
                         status = "Выбор отменён.";
                     });
@@ -95,10 +101,10 @@ public final class SuppressionStartScreen extends Screen {
                 }
                 Path selected = Path.of(selectedPath);
                 SuppressionBundleCatalog catalog = SuppressionBundleReader.readCatalog(selected);
-                client().execute(() -> openCatalog(catalog));
+                runOnClient(token, () -> openCatalog(catalog, token));
             } catch (Exception error) {
                 MapKlussCompanionClient.LOGGER.warn("Could not import local Two-layer ZIP.", error);
-                client().execute(() -> {
+                runOnClient(token, () -> {
                     busy = false;
                     status = "Не удалось загрузить план: " + readableError(error);
                 });
@@ -135,7 +141,7 @@ public final class SuppressionStartScreen extends Screen {
         }
     }
 
-    private void openCatalog(SuppressionBundleCatalog catalog) {
+    private void openCatalog(SuppressionBundleCatalog catalog, ScreenRequestGate.Token token) {
         busy = false;
         if (catalog == null || catalog.tiles().isEmpty()) {
             status = "В архиве нет карт Two-layer.";
@@ -151,9 +157,9 @@ public final class SuppressionStartScreen extends Screen {
         CompletableFuture.runAsync(() -> {
             try {
                 SuppressionBundleInstaller.Installed installed = SuppressionBundleInstaller.install(client().runDirectory.toPath(), bundle);
-                client().execute(() -> finishStart(bundle, installed));
+                runOnClient(token, () -> finishStart(bundle, installed));
             } catch (Exception error) {
-                client().execute(() -> {
+                runOnClient(token, () -> {
                     busy = false;
                     status = "Не удалось подготовить план: " + readableError(error);
                 });
@@ -187,19 +193,47 @@ public final class SuppressionStartScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        MapKlussUi.drawBackdrop(context, width, height);
         SuppressionStartLayout.Layout layout = SuppressionStartLayout.calculate(width, height);
         int panelWidth = layout.panelWidth();
         int left = layout.left();
-        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, layout.top(), Math.min(layout.bottom(), MapKlussUi.panelBottom(height)));
-        MapKlussUi.drawHeader(context, textRenderer, "TWO-LAYER", "", width, layout.top() + 11);
-        MapKlussUi.drawWrappedCenteredIn(context, textRenderer, status, width / 2, layout.statusY(), panelWidth - 16,
-            2, busy ? MapKlussUi.GOLD : MapKlussUi.statusColor(status));
+        MapKlussUi.drawPanelAt(
+            context, left - 10, left + panelWidth + 10, layout.top(), layout.bottom()
+        );
+        MapKlussUi.drawLocalHeader(
+            context, textRenderer, "TWO-LAYER", "",
+            left - 4, left + panelWidth + 4, layout.top() + (layout.compact() ? 10 : 16)
+        );
+        int sourceTop = layout.cloudY() - 18;
+        int sourceBottom = (layout.splitSources() ? layout.cloudY() : layout.localY()) + 26;
+        MapKlussUi.drawSectionAt(context, textRenderer, "Источник плана", left, panelWidth, sourceTop,
+            sourceBottom - sourceTop);
+        MapKlussUi.drawDataStrip(
+            context, left, left + panelWidth, layout.statusY() - 5,
+            Math.min(layout.backY() - 4, layout.statusY() + 18)
+        );
+        String visibleStatus = status.isBlank() ? "Выберите источник" : status;
+        MapKlussUi.drawWrappedCenteredIn(context, textRenderer, visibleStatus, width / 2, layout.statusY(),
+            panelWidth - 24, layout.guidanceLines(),
+            busy ? MapKlussUi.GOLD : MapKlussUi.statusColor(status));
         super.render(context, mouseX, mouseY, delta);
     }
 
     @Override
     public void close() {
         if (!busy) client().setScreen(parent);
+    }
+
+    @Override
+    public void removed() {
+        requests.detach();
+        super.removed();
+    }
+
+    private void runOnClient(ScreenRequestGate.Token token, Runnable task) {
+        client().execute(() -> {
+            if (requests.isCurrent(token) && client().currentScreen == this) task.run();
+        });
     }
 
     private static MinecraftClient client() {

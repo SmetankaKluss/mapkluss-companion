@@ -32,7 +32,7 @@ public final class LensManager {
     private final Set<String> realtimeDirtySessions = ConcurrentHashMap.newKeySet();
     private final Map<String, OwnedPlacementIdentity> locallyOwnedPlacements = new ConcurrentHashMap<>();
     private final Map<String, SnapshotGeometry> snapshotGeometry = new ConcurrentHashMap<>();
-    private final AtomicBoolean scheduledWork = new AtomicBoolean();
+    private final LensRecoveryGate recoveryGate = new LensRecoveryGate();
     private final AtomicBoolean heartbeatWork = new AtomicBoolean();
     private final AtomicBoolean sessionRefresh = new AtomicBoolean();
     private final AtomicBoolean placementMutation = new AtomicBoolean();
@@ -112,7 +112,11 @@ public final class LensManager {
     public void tick(Minecraft client) {
         ensurePreferences(client);
         if (client.level == null || client.player == null) {
-            if (worldKey != null) clearWorldState();
+            if (worldKey != null) {
+                clearWorldState();
+                worldKey = null;
+                worldGeneration.incrementAndGet();
+            }
             return;
         }
 
@@ -183,7 +187,9 @@ public final class LensManager {
                     capabilitiesKnown = true;
                     nextCapabilitiesAt = System.nanoTime() + LensSyncPolicy.CAPABILITIES_NANOS;
                     if (!capabilities.enabled()) {
-                        client.execute(this::clearDisabledState);
+                        client.execute(() -> {
+                            if (generation == worldGeneration.get()) clearDisabledState();
+                        });
                         return;
                     }
                 }
@@ -208,7 +214,7 @@ public final class LensManager {
                 });
             } catch (Exception e) {
                 nextSessionListAt = System.nanoTime() + LensSyncPolicy.HEARTBEAT_NANOS;
-                setError(client, "Не удалось загрузить сессии Lens", e);
+                setError(client, "Не удалось загрузить сессии Lens", e, generation, null);
             } finally {
                 sessionRefresh.set(false);
             }
@@ -222,32 +228,36 @@ public final class LensManager {
             return;
         }
         status = CompanionI18n.translate("Вход в группу Lens...");
+        long generation = worldGeneration.get();
         CompletableFuture.runAsync(() -> {
             try {
                 LensDtos.Session session = api(client).join(code);
                 client.execute(() -> {
+                    if (generation != worldGeneration.get()) return;
                     acceptSession(session);
                     status = CompanionI18n.translate("Группа подключена") + ": " + session.title();
                     nextPollAt = 0;
                 });
             } catch (Exception e) {
-                setError(client, "Не удалось войти в группу Lens", e);
+                setError(client, "Не удалось войти в группу Lens", e, generation, null);
             }
         });
     }
 
     public void leave(Minecraft client, String sessionId) {
         if (sessionId == null) return;
+        long generation = worldGeneration.get();
         CompletableFuture.runAsync(() -> {
             try {
                 api(client).leave(sessionId);
                 client.execute(() -> {
+                    if (generation != worldGeneration.get()) return;
                     sessions.remove(sessionId);
                     removeSessionState(sessionId);
                     status = CompanionI18n.translate("Вы вышли из группы Lens");
                 });
             } catch (Exception e) {
-                setError(client, "Не удалось выйти из группы Lens", e);
+                setError(client, "Не удалось выйти из группы Lens", e, generation, null);
             }
         });
     }
@@ -297,7 +307,7 @@ public final class LensManager {
                     nextPollAt = 0;
                 });
             } catch (Exception e) {
-                setError(client, "Не удалось создать размещение Lens", e);
+                setError(client, "Не удалось создать размещение Lens", e, generation, null);
             } finally {
                 placementMutation.set(false);
             }
@@ -306,17 +316,19 @@ public final class LensManager {
 
     public void deletePlacement(Minecraft client, String placementId) {
         if (placementId == null) return;
+        long generation = worldGeneration.get();
         CompletableFuture.runAsync(() -> {
             try {
                 api(client).deletePlacement(placementId);
                 client.execute(() -> {
+                    if (generation != worldGeneration.get()) return;
                     placements.remove(placementId);
                     locallyOwnedPlacements.remove(placementId);
                     snapshotGeometry.remove(placementId);
                     status = CompanionI18n.translate("Размещение Lens удалено");
                 });
             } catch (Exception e) {
-                setError(client, "Не удалось удалить размещение Lens", e);
+                setError(client, "Не удалось удалить размещение Lens", e, generation, null);
             }
         });
     }
@@ -342,12 +354,17 @@ public final class LensManager {
     public void reportPlacement(Minecraft client, LensDtos.Placement placement, String reason) {
         if (placement == null) return;
         hidePlacement(placement.placementId());
+        long generation = worldGeneration.get();
         CompletableFuture.runAsync(() -> {
             try {
                 api(client).reportPlacement(placement.placementId(), reason);
-                client.execute(() -> status = CompanionI18n.translate("Жалоба отправлена, размещение скрыто"));
+                client.execute(() -> {
+                    if (generation == worldGeneration.get()) {
+                        status = CompanionI18n.translate("Жалоба отправлена, размещение скрыто");
+                    }
+                });
             } catch (Exception e) {
-                setError(client, "Размещение скрыто, но жалобу отправить не удалось", e);
+                setError(client, "Размещение скрыто, но жалобу отправить не удалось", e, generation, null);
             }
         });
     }
@@ -362,11 +379,12 @@ public final class LensManager {
             heartbeatWork.set(false);
             return;
         }
+        long generation = worldGeneration.get();
         CompletableFuture.runAsync(() -> {
             try {
                 api(client).heartbeat(sessionIds, ownedPlacementIds);
             } catch (Exception error) {
-                setError(client, "Не удалось подтвердить активность Lens", error);
+                setError(client, "Не удалось подтвердить активность Lens", error, generation, null);
             } finally {
                 heartbeatWork.set(false);
             }
@@ -374,11 +392,13 @@ public final class LensManager {
     }
 
     private boolean scheduleRecovery(Minecraft client, boolean realtimeTriggered) {
-        if (!scheduledWork.compareAndSet(false, true)) return false;
+        LensRecoveryGate.Token recovery = recoveryGate.tryBegin();
+        if (recovery == null) return false;
         Set<String> sessionIds = syncSessionIds(realtimeTriggered);
         if (sessionIds.isEmpty()) {
-            nextPollAt = System.nanoTime() + LensSyncPolicy.HEALTHY_POLL_NANOS;
-            scheduledWork.set(false);
+            recoveryGate.finish(recovery, () ->
+                nextPollAt = System.nanoTime() + LensSyncPolicy.HEALTHY_POLL_NANOS
+            );
             return false;
         }
         if (realtimeTriggered) realtimeDirtySessions.removeAll(sessionIds);
@@ -392,39 +412,44 @@ public final class LensManager {
         CompletableFuture.runAsync(() -> {
             boolean failed = false;
             try {
+                if (!recoveryGate.isCurrent(recovery)) return;
                 LensApiClient api = api(client);
                 for (String sessionId : sessionIds) {
+                    if (!recoveryGate.isCurrent(recovery)) return;
                     try {
-                        pollSession(api, client, generation, sessionId, serverHash, dimensionId);
+                        pollSession(api, client, recovery, generation, sessionId, serverHash, dimensionId);
                     } catch (LensApiException error) {
+                        if (!recoveryGate.isCurrent(recovery)) return;
                         if ("session_gone".equals(error.errorCode()) || "not_joined".equals(error.errorCode()) || "not_found".equals(error.errorCode())) {
                             client.execute(() -> {
+                                if (generation != worldGeneration.get() || !recoveryGate.isLatest(recovery)) return;
                                 sessions.remove(sessionId);
                                 removeSessionState(sessionId);
                             });
                         } else {
+                            if (!recoveryGate.runIfCurrent(recovery, () -> realtimeDirtySessions.add(sessionId))) return;
                             failed = true;
-                            realtimeDirtySessions.add(sessionId);
                             MapKlussCompanionClient.LOGGER.debug("Lens session {} poll failed.", sessionId, error);
                         }
                     } catch (Exception error) {
+                        if (!recoveryGate.runIfCurrent(recovery, () -> realtimeDirtySessions.add(sessionId))) return;
                         failed = true;
-                        realtimeDirtySessions.add(sessionId);
                         MapKlussCompanionClient.LOGGER.debug("Lens session {} poll failed.", sessionId, error);
                     }
                 }
             } catch (Exception e) {
+                if (!recoveryGate.runIfCurrent(recovery, () -> realtimeDirtySessions.addAll(sessionIds))) return;
                 failed = true;
-                realtimeDirtySessions.addAll(sessionIds);
-                setError(client, "Не удалось обновить Lens", e);
+                setError(client, "Не удалось обновить Lens", e, generation, recovery);
             } finally {
                 boolean healthy = !failed && realtimeHealthy(sessionIds);
                 int currentAttempt = degradedPollAttempt;
-                degradedPollAttempt = LensSyncPolicy.nextDegradedAttempt(healthy, currentAttempt);
-                nextPollAt = System.nanoTime() + LensSyncPolicy.jitteredDelayNanos(
-                    LensSyncPolicy.recoveryDelayNanos(healthy, currentAttempt)
-                );
-                scheduledWork.set(false);
+                recoveryGate.finish(recovery, () -> {
+                    degradedPollAttempt = LensSyncPolicy.nextDegradedAttempt(healthy, currentAttempt);
+                    nextPollAt = System.nanoTime() + LensSyncPolicy.jitteredDelayNanos(
+                        LensSyncPolicy.recoveryDelayNanos(healthy, currentAttempt)
+                    );
+                });
             }
         });
         return true;
@@ -433,6 +458,7 @@ public final class LensManager {
     private void pollSession(
         LensApiClient api,
         Minecraft client,
+        LensRecoveryGate.Token recovery,
         long generation,
         String sessionId,
         String serverHash,
@@ -443,7 +469,7 @@ public final class LensManager {
         long knownRevision = atlas == null ? 0 : Math.max(0, atlas.revision());
         LensDtos.PollResult result = api.poll(sessionId, knownRevision, serverHash, dimensionId);
         client.execute(() -> {
-            if (generation != worldGeneration.get() || result.session() == null) return;
+            if (generation != worldGeneration.get() || !recoveryGate.isLatest(recovery) || result.session() == null) return;
             LensDtos.Session current = sessions.get(sessionId);
             if (current != null && result.session().revision() < current.revision()) return;
             acceptSession(result.session());
@@ -523,7 +549,7 @@ public final class LensManager {
             if (placement.serverHash() != null && !placement.serverHash().isBlank()
                 && !placement.serverHash().equals(currentServer)) continue;
             Direction facing = parseFacing(placement.facing());
-            if (facing == null || !facing.getAxis().isHorizontal()) continue;
+            if (facing == null) continue;
             BlockPos anchor = new BlockPos(placement.anchor().x(), placement.anchor().y(), placement.anchor().z());
             FrameWallGeometry.Coord origin = FrameWallGeometry.fromBlockPos(anchor, facing);
             BlockPos topRight = FrameWallGeometry.toBlockPos(
@@ -613,9 +639,7 @@ public final class LensManager {
             throw new LensApiException(401, "unauthorized", "Sign in to MapKluss first", null);
         }
         realtimeBackendUrl = runtime.backendUrl();
-        return new LensApiClient(
-            runtime.backendUrl(), runtime.config().supabaseAnonKey(), runtime.sessionStore().accessToken()
-        );
+        return new LensApiClient(runtime.config(), runtime.sessionStore().accessToken());
     }
 
     private void ensurePreferences(Minecraft client) {
@@ -628,6 +652,7 @@ public final class LensManager {
     }
 
     private void clearWorldState() {
+        recoveryGate.invalidate();
         placements.clear();
         snapshotGeometry.clear();
         renderSnapshots = List.of();
@@ -640,6 +665,7 @@ public final class LensManager {
     }
 
     private void clearAccountState() {
+        worldGeneration.incrementAndGet();
         clearWorldState();
         sessions.clear();
         locallyOwnedPlacements.clear();
@@ -647,6 +673,10 @@ public final class LensManager {
         nextCapabilitiesAt = 0;
         enabled = true;
         status = CompanionI18n.translate("Войдите в MapKluss, чтобы использовать Lens");
+    }
+
+    public void clearForLogout() {
+        clearAccountState();
     }
 
     private void removeSessionState(String sessionId) {
@@ -661,6 +691,7 @@ public final class LensManager {
     }
 
     private void clearDisabledState() {
+        worldGeneration.incrementAndGet();
         clearWorldState();
         sessions.clear();
         enabled = false;
@@ -668,7 +699,19 @@ public final class LensManager {
     }
 
     private void setError(Minecraft client, String prefix, Exception error) {
+        setError(client, prefix, error, -1, null);
+    }
+
+    private void setError(
+        Minecraft client,
+        String prefix,
+        Exception error,
+        long expectedGeneration,
+        LensRecoveryGate.Token recovery
+    ) {
         client.execute(() -> {
+            if (expectedGeneration >= 0 && expectedGeneration != worldGeneration.get()) return;
+            if (recovery != null && !recoveryGate.isLatest(recovery)) return;
             if (error instanceof LensApiException apiError) {
                 if (apiError.statusCode() == 401 || "unauthorized".equals(apiError.errorCode())) {
                     clearAccountState();
@@ -755,6 +798,8 @@ public final class LensManager {
             case "south" -> Direction.SOUTH;
             case "east" -> Direction.EAST;
             case "west" -> Direction.WEST;
+            case "up" -> Direction.UP;
+            case "down" -> Direction.DOWN;
             default -> null;
         };
     }

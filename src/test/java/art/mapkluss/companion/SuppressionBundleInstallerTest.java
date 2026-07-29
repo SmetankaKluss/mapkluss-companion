@@ -1,8 +1,11 @@
 package art.mapkluss.companion;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -34,6 +37,24 @@ final class SuppressionBundleInstallerTest {
 
         assertThrows(java.io.IOException.class,
             () -> SuppressionBundleInstaller.install(tempDir, bundle(parsed, plan, litematic)));
+        assertFalse(Files.exists(tempDir.resolve("config/mapkluss-companion/suppression")));
+        assertFalse(Files.exists(tempDir.resolve("schematics")));
+    }
+
+    @Test
+    void rejectsInvalidSourceBeforeCreatingManagedFolders() throws Exception {
+        byte[] litematic = SuppressionTestFixtures.litematicV3Bytes();
+        byte[] corrupted = litematic.clone();
+        corrupted[corrupted.length - 1] ^= 1;
+        JsonObject root = JsonParser.parseString(new String(
+            SuppressionTestFixtures.planV3Bytes(litematic), StandardCharsets.UTF_8
+        )).getAsJsonObject();
+        root.getAsJsonObject("litematic").addProperty("sha256", SuppressionHashes.sha256(corrupted));
+        byte[] plan = root.toString().getBytes(StandardCharsets.UTF_8);
+        SuppressionPlanParser.Parsed parsed = SuppressionPlanParser.parse(plan);
+
+        assertThrows(java.io.IOException.class,
+            () -> SuppressionBundleInstaller.install(tempDir, bundle(parsed, plan, corrupted)));
         assertFalse(Files.exists(tempDir.resolve("config/mapkluss-companion/suppression")));
         assertFalse(Files.exists(tempDir.resolve("schematics")));
     }

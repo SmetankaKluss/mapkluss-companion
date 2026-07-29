@@ -16,18 +16,42 @@ public final class MapArtLayoutSolver {
     }
 
     public static Layout solve(List<Tile> input, String bottomLeftHash) {
-        return solve(input, bottomLeftHash, null);
+        return solve(input, bottomLeftHash, null, null);
     }
 
     public static Layout solveByMapId(List<Tile> input, Integer bottomLeftMapId) {
-        return solve(input, null, bottomLeftMapId);
+        return solve(input, null, bottomLeftMapId, null);
     }
 
-    private static Layout solve(List<Tile> input, String bottomLeftHash, Integer bottomLeftMapId) {
+    public static Layout solveWithDimensions(List<Tile> input, int wide, int tall) {
+        return solve(input, null, null, new Dimensions(wide, tall));
+    }
+
+    public static Layout solveByMapIdWithDimensions(
+        List<Tile> input,
+        Integer bottomLeftMapId,
+        int wide,
+        int tall
+    ) {
+        return solve(input, null, bottomLeftMapId, new Dimensions(wide, tall));
+    }
+
+    private static Layout solve(
+        List<Tile> input,
+        String bottomLeftHash,
+        Integer bottomLeftMapId,
+        Dimensions requiredDimensions
+    ) {
         List<Tile> tiles = List.copyOf(Objects.requireNonNull(input, "input"));
         if (tiles.isEmpty()) throw new IllegalArgumentException("At least one map tile is required.");
         if (tiles.size() > MAX_UNKNOWN_TILES) {
             throw new IllegalArgumentException("Unknown layouts are limited to " + MAX_UNKNOWN_TILES + " maps.");
+        }
+        if (requiredDimensions != null && requiredDimensions.cellCount() != tiles.size()) {
+            throw new IllegalArgumentException(
+                "Expected " + requiredDimensions.cellCount() + " maps for "
+                    + requiredDimensions.wide() + "x" + requiredDimensions.tall() + ", got " + tiles.size() + "."
+            );
         }
         for (Tile tile : tiles) tile.validate();
         if (tiles.size() == 1) {
@@ -48,6 +72,8 @@ public final class MapArtLayoutSolver {
         for (int wide = 1; wide <= count; wide++) {
             if (count % wide != 0) continue;
             int tall = count / wide;
+            if (requiredDimensions != null
+                && (requiredDimensions.wide() != wide || requiredDimensions.tall() != tall)) continue;
             SolvedCandidate candidate = solveDimensions(tiles, right, down, wide, tall, bottomLeftHash, bottomLeftMapId);
             if (candidate != null) solved.add(candidate);
         }
@@ -63,6 +89,20 @@ public final class MapArtLayoutSolver {
             mapIds.add(tiles.get(tileIndex).mapId());
         }
         return new Layout(best.wide(), best.tall(), hashes, mapIds, best.quality(), reliable);
+    }
+
+    private record Dimensions(int wide, int tall) {
+        private Dimensions {
+            if (wide <= 0 || tall <= 0) throw new IllegalArgumentException("Layout dimensions must be positive.");
+        }
+
+        private int cellCount() {
+            try {
+                return Math.multiplyExact(wide, tall);
+            } catch (ArithmeticException overflow) {
+                throw new IllegalArgumentException("Layout dimensions are too large.", overflow);
+            }
+        }
     }
 
     private static SolvedCandidate solveDimensions(

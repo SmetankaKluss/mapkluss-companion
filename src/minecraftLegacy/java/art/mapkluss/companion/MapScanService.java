@@ -44,36 +44,52 @@ public final class MapScanService {
         if (!stack.isOf(Items.FILLED_MAP)) {
             throw new IOException("Hold a filled map in either hand.");
         }
-        return scanStack(client, stack, "hand");
+        return scanStack(client, stack, 0, "hand");
     }
 
     public static MapScanDraft scanTargetFrame(MinecraftClient client) throws IOException {
         ItemFrameEntity frame = targetMapFrame(client);
-        return scanStack(client, frame.getHeldItemStack(), "frame");
+        return scanStack(client, frame.getHeldItemStack(), frame.getRotation(), "frame");
     }
 
     public static MapScanDraft scanTargetWall(MinecraftClient client) throws IOException {
-        if (client.world == null) throw new IOException("Open a world before scanning.");
+        if (client.world == null || client.player == null) throw new IOException("Open a world before scanning.");
         ItemFrameEntity target = targetMapFrame(client);
         Direction facing = target.getHorizontalFacing();
-        FrameWallGeometry.ScanCoord origin = FrameWallGeometry.fromScanBlockPos(target.getAttachedBlockPos(), facing);
-        Map<FrameWallGeometry.ScanCoord, ItemFrameEntity> frames = mapFramesOnPlane(client, target.getBoundingBox().expand(64.0), facing, origin.plane());
+        Direction planeUp = AutoFramePlacement.planeUpFromPlayerView(facing, client.player.getHorizontalFacing());
+        FrameWallGeometry.ScanCoord origin = FrameWallGeometry.fromScanBlockPos(target.getAttachedBlockPos(), facing, planeUp);
+        Map<FrameWallGeometry.ScanCoord, ItemFrameEntity> frames = mapFramesOnPlane(
+            client, target.getBoundingBox().expand(64.0), facing, planeUp, origin.plane());
         frames.putIfAbsent(origin, target);
 
-        Set<FrameWallGeometry.ScanCoord> component = connectedComponent(frames, origin);
+        Set<FrameWallGeometry.ScanCoord> component = connectedComponent(frames.keySet(), origin);
         if (component.isEmpty()) throw new IOException("No connected map frames found.");
+        Set<FrameWallGeometry.ScanCoord> filled = new HashSet<>();
+        for (FrameWallGeometry.ScanCoord coord : component) {
+            ItemFrameEntity frame = frames.get(coord);
+            if (frame != null && frame.containsMap()) filled.add(coord);
+        }
+        if (filled.isEmpty()) throw new IOException("No filled map frames found.");
 
-        int minX = component.stream().mapToInt(FrameWallGeometry.ScanCoord::x).min().orElse(origin.x());
-        int maxX = component.stream().mapToInt(FrameWallGeometry.ScanCoord::x).max().orElse(origin.x());
-        int minY = component.stream().mapToInt(FrameWallGeometry.ScanCoord::y).min().orElse(origin.y());
-        int maxY = component.stream().mapToInt(FrameWallGeometry.ScanCoord::y).max().orElse(origin.y());
+        int minX = filled.stream().mapToInt(FrameWallGeometry.ScanCoord::x).min().orElse(origin.x());
+        int maxX = filled.stream().mapToInt(FrameWallGeometry.ScanCoord::x).max().orElse(origin.x());
+        int minY = filled.stream().mapToInt(FrameWallGeometry.ScanCoord::y).min().orElse(origin.y());
+        int maxY = filled.stream().mapToInt(FrameWallGeometry.ScanCoord::y).max().orElse(origin.y());
         return scanRectangle(client, frames, origin.plane(), minX, maxX, minY, maxY, "wall");
     }
 
     public static MapFrameCorner captureTargetCorner(MinecraftClient client) throws IOException {
+        return captureTargetCorner(client, null);
+    }
+
+    public static MapFrameCorner captureTargetCorner(MinecraftClient client, MapFrameCorner basis) throws IOException {
+        if (client.player == null) throw new IOException("Open a world before scanning.");
         ItemFrameEntity target = targetMapFrame(client);
         Direction facing = target.getHorizontalFacing();
-        return FrameWallGeometry.scanCorner(target.getAttachedBlockPos(), facing);
+        Direction planeUp = basis != null && basis.facing() == facing
+            ? basis.planeUp()
+            : AutoFramePlacement.planeUpFromPlayerView(facing, client.player.getHorizontalFacing());
+        return FrameWallGeometry.scanCorner(target.getAttachedBlockPos(), facing, planeUp);
     }
 
     public static MapScanDraft scanWallBetweenCorners(MinecraftClient client, MapFrameCorner first, MapFrameCorner second) throws IOException {
@@ -86,7 +102,8 @@ public final class MapScanService {
         int minY = Math.min(first.y(), second.y());
         int maxY = Math.max(first.y(), second.y());
         Box searchBox = new Box(client.player.getBlockPos()).expand(Math.max(16.0, Math.max(maxX - minX + 8.0, maxY - minY + 8.0)));
-        Map<FrameWallGeometry.ScanCoord, ItemFrameEntity> frames = mapFramesOnPlane(client, searchBox, first.facing(), first.plane());
+        Map<FrameWallGeometry.ScanCoord, ItemFrameEntity> frames = mapFramesOnPlane(
+            client, searchBox, first.facing(), first.planeUp(), first.plane());
         return scanRectangle(client, frames, first.plane(), minX, maxX, minY, maxY, "manual_wall");
     }
 
@@ -108,7 +125,7 @@ public final class MapScanService {
             for (int x = minX; x <= maxX; x++) {
                 FrameWallGeometry.ScanCoord coord = new FrameWallGeometry.ScanCoord(plane, x, y);
                 ItemFrameEntity frame = frames.get(coord);
-                if (frame == null) {
+                if (frame == null || !frame.containsMap()) {
                     missing++;
                     continue;
                 }
@@ -117,7 +134,11 @@ public final class MapScanService {
                     missing++;
                     continue;
                 }
-                tiles.add(new MapScanAssembler.Tile(x - minX, maxY - y, argbFromMapState(state)));
+                tiles.add(new MapScanAssembler.Tile(
+                    x - minX,
+                    maxY - y,
+                    MapScanAssembler.rotateTileClockwise(argbFromMapState(state), frame.getRotation())
+                ));
             }
         }
         String title = "scan-" + source + "-" + LocalDateTime.now().format(TITLE_TIME);
@@ -144,13 +165,15 @@ public final class MapScanService {
         return MapScanAssembler.writePng(image);
     }
 
-    private static MapScanDraft scanStack(MinecraftClient client, ItemStack stack, String source) throws IOException {
+    private static MapScanDraft scanStack(MinecraftClient client, ItemStack stack, int rotation, String source) throws IOException {
         MapState state = FilledMapItem.getMapState(stack, client.world);
         if (state == null) {
             throw new IOException("Map data is not loaded on the client yet.");
         }
         String title = "scan-" + source + "-" + LocalDateTime.now().format(TITLE_TIME);
-        return new MapScanDraft(title, source, 1, 1, 0, pngFromMapState(state));
+        int[] rotated = MapScanAssembler.rotateTileClockwise(argbFromMapState(state), rotation);
+        return new MapScanDraft(title, source, 1, 1, 0,
+            MapScanAssembler.assemblePng(List.of(new MapScanAssembler.Tile(0, 0, rotated)), 1, 1));
     }
 
     private static ItemFrameEntity targetMapFrame(MinecraftClient client) throws IOException {
@@ -164,26 +187,31 @@ public final class MapScanService {
         return frame;
     }
 
-    private static Map<FrameWallGeometry.ScanCoord, ItemFrameEntity> mapFramesOnPlane(MinecraftClient client, Box searchBox, Direction facing, int plane) {
+    private static Map<FrameWallGeometry.ScanCoord, ItemFrameEntity> mapFramesOnPlane(
+        MinecraftClient client, Box searchBox, Direction facing, Direction planeUp, int plane
+    ) {
         Map<FrameWallGeometry.ScanCoord, ItemFrameEntity> frames = new HashMap<>();
         if (client.world == null) return frames;
-        for (ItemFrameEntity frame : client.world.getEntitiesByClass(ItemFrameEntity.class, searchBox, frame -> frame.containsMap() && frame.getHorizontalFacing() == facing)) {
-            FrameWallGeometry.ScanCoord coord = FrameWallGeometry.fromScanBlockPos(frame.getAttachedBlockPos(), facing);
+        for (ItemFrameEntity frame : client.world.getEntitiesByClass(
+            ItemFrameEntity.class, searchBox, frame -> frame.getHorizontalFacing() == facing)) {
+            FrameWallGeometry.ScanCoord coord = FrameWallGeometry.fromScanBlockPos(frame.getAttachedBlockPos(), facing, planeUp);
             if (coord.plane() == plane) frames.putIfAbsent(coord, frame);
         }
         return frames;
     }
 
-    private static Set<FrameWallGeometry.ScanCoord> connectedComponent(Map<FrameWallGeometry.ScanCoord, ItemFrameEntity> frames, FrameWallGeometry.ScanCoord origin) {
+    static Set<FrameWallGeometry.ScanCoord> connectedComponent(
+        Set<FrameWallGeometry.ScanCoord> framePositions, FrameWallGeometry.ScanCoord origin
+    ) {
         Set<FrameWallGeometry.ScanCoord> visited = new HashSet<>();
         ArrayDeque<FrameWallGeometry.ScanCoord> queue = new ArrayDeque<>();
-        if (!frames.containsKey(origin)) return visited;
+        if (!framePositions.contains(origin)) return visited;
         visited.add(origin);
         queue.add(origin);
         while (!queue.isEmpty()) {
             FrameWallGeometry.ScanCoord coord = queue.removeFirst();
             for (FrameWallGeometry.ScanCoord next : coord.neighbors()) {
-                if (frames.containsKey(next) && visited.add(next)) queue.add(next);
+                if (framePositions.contains(next) && visited.add(next)) queue.add(next);
             }
         }
         return visited;

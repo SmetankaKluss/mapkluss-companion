@@ -12,10 +12,15 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 public class CompanionApiClient {
+    private static final int MAX_API_RESPONSE_BYTES = 8 * 1024 * 1024;
+    private static final int MAX_ARTIFACT_BYTES = 128 * 1024 * 1024;
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
     private static final Gson GSON = new Gson();
     private static final Type LIBRARY_LIST = new TypeToken<ItemListResponse<CompanionLibraryItem>>() { }.getType();
     private static final Type COLLECTION_LIST = new TypeToken<ItemListResponse<CompanionCollection>>() { }.getType();
@@ -24,13 +29,23 @@ public class CompanionApiClient {
     private final URI deviceFunctionsBase;
     private final URI modFunctionsBase;
     private final String anonKey;
+    private final CompanionConfig routingConfig;
     private String bearerToken;
 
     public CompanionApiClient(String supabaseUrl, String anonKey) {
-        this.http = HttpClient.newHttpClient();
+        this(supabaseUrl, anonKey, null);
+    }
+
+    public CompanionApiClient(CompanionConfig config) {
+        this(config.supabaseUrl(), config.supabaseAnonKey(), config);
+    }
+
+    private CompanionApiClient(String supabaseUrl, String anonKey, CompanionConfig routingConfig) {
+        this.http = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         this.deviceFunctionsBase = URI.create(stripTrailingSlash(supabaseUrl) + "/functions/v1/companion-device");
         this.modFunctionsBase = URI.create(stripTrailingSlash(supabaseUrl) + "/functions/v1/companion-mod");
         this.anonKey = anonKey;
+        this.routingConfig = routingConfig;
     }
 
     public void setBearerToken(String bearerToken) {
@@ -179,13 +194,7 @@ public class CompanionApiClient {
     }
 
     public byte[] downloadArtifact(CompanionArtifact artifact) throws IOException, InterruptedException {
-        URI uri = requireSignedArtifactUri(artifact);
-        HttpRequest request = HttpRequest.newBuilder(uri)
-            .GET()
-            .build();
-        HttpResponse<byte[]> response = http.send(request, HttpResponse.BodyHandlers.ofByteArray());
-        requireSuccess(response.statusCode(), new String(response.body()));
-        return response.body();
+        return downloadArtifactBounded(artifact, MAX_ARTIFACT_BYTES);
     }
 
     public byte[] downloadArtifactBounded(CompanionArtifact artifact, int maxBytes) throws IOException, InterruptedException {
@@ -194,6 +203,7 @@ public class CompanionApiClient {
         }
         URI uri = requireSignedArtifactUri(artifact);
         HttpRequest request = HttpRequest.newBuilder(uri)
+            .timeout(REQUEST_TIMEOUT)
             .GET()
             .build();
         HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
@@ -261,16 +271,70 @@ public class CompanionApiClient {
     }
 
     private <T> T post(URI uri, JsonObject payload, Type type, boolean auth) throws IOException, InterruptedException {
+        URI selectedUri = routedEndpoint(uri);
+        ApiResponse response;
+        try {
+            response = sendPost(selectedUri, payload, auth);
+        } catch (IOException error) {
+            if (!canFallback(selectedUri)) throw error;
+            CompanionBackendRouter.reportFailure(routingConfig, selectedUri);
+            if (!safeToRetry(payload)) throw error;
+            response = sendPost(CompanionBackendRouter.directEndpoint(routingConfig, uri.getPath()), payload, auth);
+        }
+        if (retryableGatewayStatus(selectedUri, response.status()) && safeToRetry(payload)) {
+            CompanionBackendRouter.reportFailure(routingConfig, selectedUri);
+            response = sendPost(CompanionBackendRouter.directEndpoint(routingConfig, uri.getPath()), payload, auth);
+        } else if (retryableGatewayStatus(selectedUri, response.status())) {
+            CompanionBackendRouter.reportFailure(routingConfig, selectedUri);
+        }
+        requireSuccess(response.status(), response.body());
+        return GSON.fromJson(response.body(), type);
+    }
+
+    private ApiResponse sendPost(URI uri, JsonObject payload, boolean auth) throws IOException, InterruptedException {
         HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
+            .timeout(REQUEST_TIMEOUT)
             .header("apikey", anonKey)
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)));
         if (auth && bearerToken != null && !bearerToken.isBlank()) {
             builder.header("Authorization", "Bearer " + bearerToken);
         }
-        HttpResponse<String> response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-        requireSuccess(response.statusCode(), response.body());
-        return GSON.fromJson(response.body(), type);
+        HttpResponse<InputStream> response = http.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
+        byte[] responseBytes;
+        try (InputStream body = response.body()) {
+            responseBytes = readBounded(body, response.statusCode() >= 200 && response.statusCode() < 300
+                ? MAX_API_RESPONSE_BYTES
+                : 64 * 1024);
+        }
+        String responseBody = new String(responseBytes, java.nio.charset.StandardCharsets.UTF_8);
+        return new ApiResponse(response.statusCode(), responseBody);
+    }
+
+    private URI routedEndpoint(URI endpoint) {
+        if (routingConfig == null) return endpoint;
+        return URI.create(CompanionBackendRouter.select(routingConfig) + endpoint.getPath());
+    }
+
+    private boolean canFallback(URI attemptedUri) {
+        return routingConfig != null
+            && !CompanionBackendRouter.directEndpoint(routingConfig, attemptedUri.getPath()).equals(attemptedUri);
+    }
+
+    private boolean retryableGatewayStatus(URI attemptedUri, int status) {
+        return canFallback(attemptedUri) && (status == 502 || status == 503 || status == 504);
+    }
+
+    private static boolean safeToRetry(JsonObject payload) {
+        String action = payload != null && payload.has("action") ? payload.get("action").getAsString() : "";
+        return switch (action) {
+            case "device_poll", "manifest", "library", "favorites", "recent", "collections",
+                "collection_items", "scan_get", "tracker_get", "tracker_for_art" -> true;
+            default -> false;
+        };
+    }
+
+    private record ApiResponse(int status, String body) {
     }
 
     private static JsonObject newAction(String action) {

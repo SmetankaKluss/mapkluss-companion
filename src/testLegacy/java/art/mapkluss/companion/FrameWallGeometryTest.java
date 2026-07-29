@@ -8,9 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 final class FrameWallGeometryTest {
     @Test
-    void roundTripsHorizontalWallCoordinates() {
+    void roundTripsEveryFramePlane() {
         BlockPos position = new BlockPos(12, 70, -9);
-        for (Direction facing : Direction.Type.HORIZONTAL) {
+        for (Direction facing : Direction.values()) {
             FrameWallGeometry.Coord coord = FrameWallGeometry.fromBlockPos(position, facing);
             assertEquals(position, FrameWallGeometry.toBlockPos(facing, coord));
         }
@@ -29,13 +29,29 @@ final class FrameWallGeometryTest {
         assertRightCell(anchor, Direction.SOUTH, new BlockPos(1, 64, 0));
         assertRightCell(anchor, Direction.EAST, new BlockPos(0, 64, -1));
         assertRightCell(anchor, Direction.WEST, new BlockPos(0, 64, 1));
+        assertRightCell(anchor, Direction.UP, new BlockPos(1, 64, 0));
+        assertRightCell(anchor, Direction.DOWN, new BlockPos(-1, 64, 0));
     }
 
     @Test
-    void preservesLegacyScanOrdering() {
+    void growsTowardScreenUpForFloorAndCeiling() {
+        BlockPos anchor = new BlockPos(0, 64, 0);
+        for (Direction facing : new Direction[]{Direction.UP, Direction.DOWN}) {
+            FrameWallGeometry.Coord origin = FrameWallGeometry.fromBlockPos(anchor, facing);
+            assertEquals(
+                new BlockPos(0, 64, -1),
+                FrameWallGeometry.toBlockPos(facing, FrameWallGeometry.cell(origin, 0, 1))
+            );
+        }
+    }
+
+    @Test
+    void scanOrderingMatchesViewerRight() {
         BlockPos east = new BlockPos(1, 64, 0);
-        assertEquals(1, FrameWallGeometry.fromScanBlockPos(east, Direction.NORTH).x());
-        assertEquals(-1, FrameWallGeometry.fromScanBlockPos(east, Direction.SOUTH).x());
+        assertEquals(-1, FrameWallGeometry.fromScanBlockPos(east, Direction.NORTH).x());
+        assertEquals(1, FrameWallGeometry.fromScanBlockPos(east, Direction.SOUTH).x());
+        assertEquals(1, FrameWallGeometry.fromScanBlockPos(east, Direction.UP).x());
+        assertEquals(-1, FrameWallGeometry.fromScanBlockPos(east, Direction.DOWN).x());
     }
 
     private static void assertRightCell(BlockPos anchor, Direction facing, BlockPos expected) {

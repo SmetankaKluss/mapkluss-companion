@@ -9,7 +9,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 public final class LensScreen extends Screen {
-    private static final int PANEL_WIDTH = 540;
+    private static final int PANEL_WIDTH = 1120;
     private static final int INPUT_Y = 88;
     private static final int TABS_Y = 118;
     private static final int LIST_Y = 155;
@@ -75,15 +75,15 @@ public final class LensScreen extends Screen {
         addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Войти по коду"), button -> {
                 rememberCode();
                 manager.join(client(), code);
-            }).dimensions(left + codeWidth + gap, INPUT_Y, joinWidth, 20).build());
+            }).special().dimensions(left + codeWidth + gap, INPUT_Y, joinWidth, 20).build());
         addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Обновить"), button -> manager.refreshSessions(client()))
-            .dimensions(left + codeWidth + joinWidth + gap * 2, INPUT_Y, refreshWidth, 20).build());
+            .technical().dimensions(left + codeWidth + joinWidth + gap * 2, INPUT_Y, refreshWidth, 20).build());
 
         int half = Math.max(80, (panelWidth - gap) / 2);
         addRenderableWidget(MapKlussButton.builder(Component.literal(sessionTabLabel()), button -> openOrAdvance(false))
-            .selected(!placementsTab).dimensions(left, TABS_Y, half, 20).build());
+            .special().selected(!placementsTab).dimensions(left, TABS_Y, half, 20).build());
         addRenderableWidget(MapKlussButton.builder(Component.literal(placementTabLabel()), button -> openOrAdvance(true))
-            .selected(placementsTab).dimensions(left + half + gap, TABS_Y, panelWidth - half - gap, 20).build());
+            .special().selected(placementsTab).dimensions(left + half + gap, TABS_Y, panelWidth - half - gap, 20).build());
 
         reconcileSelection();
         if (placementsTab) {
@@ -135,10 +135,10 @@ public final class LensScreen extends Screen {
         addVisibilityButton(left, controlsY, half, "personal", "Личное");
         addVisibilityButton(left + half + gap, controlsY, panelWidth - half - gap, "group", "Группа");
         LensDtos.Session selected = selectedSession();
-        addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Закрепить по левой нижней рамке"), button ->
+        addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Закрепить по угловой рамке"), button ->
                 manager.anchorTarget(client(), selectedSessionId, visibility))
-            .gold()
-            .tooltip(CompanionI18n.text(selected == null ? "Сначала выберите сессию Lens" : "Закрепить по левой нижней рамке"))
+            .special()
+            .tooltip(CompanionI18n.text(selected == null ? "Сначала выберите сессию Lens" : "Закрепить по угловой рамке"))
             .dimensions(left, controlsY + 26, panelWidth, 20)
             .enabledWhen(() -> selectedSession() != null && selectedSession().ownedByUser())
             .build());
@@ -313,9 +313,15 @@ public final class LensScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+        MapKlussUi.drawBackdrop(context, width, height);
         int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = MapKlussUi.centeredLeft(width, panelWidth);
-        MapKlussUi.drawPanel(context, width, PANEL_WIDTH, 18, MapKlussUi.panelBottom(height));
+        MapKlussUi.drawPanel(context, width, PANEL_WIDTH, 46, MapKlussUi.panelBottom(height));
+        MapKlussUi.drawSectionAt(context, font, null, left, panelWidth, INPUT_Y - 14, 38);
+        int listTop = TABS_Y - 5;
+        int listBottom = Math.min(MapKlussUi.panelBottom(height) - 4, MapKlussUi.contentBottom(height));
+        MapKlussUi.drawSectionAt(context, font, placementsTab ? "Размещения" : "Сессии",
+            left, panelWidth, listTop, Math.max(0, listBottom - listTop));
         MapKlussUi.drawHeader(context, font, "MapKluss Lens", "", width, 28);
         MapKlussUi.drawFieldLabel(context, font, "Код Lens", left, INPUT_Y, panelWidth);
 

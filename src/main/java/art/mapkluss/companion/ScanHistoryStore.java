@@ -5,12 +5,12 @@ import com.google.gson.GsonBuilder;
 
 import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 public final class ScanHistoryStore {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -25,11 +25,15 @@ public final class ScanHistoryStore {
     }
 
     public static ScanHistoryStore load(Path path) throws IOException {
-        if (!Files.exists(path)) return new ScanHistoryStore(path, new StoredScanHistory(new ArrayList<>()));
+        return new ScanHistoryStore(path, readStored(path));
+    }
+
+    private static StoredScanHistory readStored(Path path) throws IOException {
+        if (!Files.exists(path)) return new StoredScanHistory(new ArrayList<>());
         try (Reader reader = Files.newBufferedReader(path)) {
             StoredScanHistory loaded = GSON.fromJson(reader, StoredScanHistory.class);
             if (loaded == null || loaded.entries() == null) loaded = new StoredScanHistory(new ArrayList<>());
-            return new ScanHistoryStore(path, loaded);
+            return loaded;
         }
     }
 
@@ -51,101 +55,127 @@ public final class ScanHistoryStore {
             null,
             Instant.now().toString()
         );
-        upsert(entry);
-        return entry;
+        return upsert(entry);
     }
 
     public ScanHistoryEntry attachUpload(String localPath, ScanUploadResponse response) throws IOException {
-        ScanHistoryEntry current = history.entries().stream()
-            .filter(entry -> entry.localPath().equals(localPath))
-            .findFirst()
-            .orElseThrow(() -> new IOException("Scan history entry was not found for upload result."));
-        ScanHistoryEntry updated = new ScanHistoryEntry(
-            current.title(),
-            current.source(),
-            current.wide(),
-            current.tall(),
-            current.missingMaps(),
-            current.localPath(),
-            response.importId(),
-            current.createdArtId(),
-            response.sha256(),
-            Instant.now().toString(),
-            current.createdAt()
-        );
-        upsert(updated);
-        return updated;
+        return update(localPath, "Scan history entry was not found for upload result.", current ->
+            new ScanHistoryEntry(
+                current.title(), current.source(), current.wide(), current.tall(), current.missingMaps(),
+                current.localPath(), response.importId(), current.createdArtId(), response.sha256(),
+                Instant.now().toString(), current.createdAt()
+            ));
+    }
+
+    public ScanHistoryEntry rememberUpload(
+        MapScanDraft draft,
+        Path localPath,
+        ScanUploadResponse response
+    ) throws IOException {
+        return AtomicFiles.withLock(path, () -> {
+            StoredScanHistory latest = readStored(path);
+            String key = localPath.toString();
+            ScanHistoryEntry current = latest.entries().stream()
+                .filter(entry -> entry.localPath().equals(key))
+                .findFirst()
+                .orElse(null);
+            String now = Instant.now().toString();
+            boolean sameUpload = current != null && (
+                (response.sha256() != null && !response.sha256().isBlank()
+                    && response.sha256().equals(current.uploadedSha256()))
+                || (response.importId() != null && !response.importId().isBlank()
+                    && response.importId().equals(current.importId()))
+            );
+            ScanHistoryEntry updated = new ScanHistoryEntry(
+                draft.title(), draft.source(), draft.wide(), draft.tall(), draft.missingMaps(), key,
+                response.importId(), sameUpload ? current.createdArtId() : null, response.sha256(), now,
+                current == null ? now : current.createdAt()
+            );
+            StoredScanHistory next = upsertState(latest, updated, key);
+            AtomicFiles.writePrivateUtf8(path, GSON.toJson(next));
+            history = next;
+            return updated;
+        });
     }
 
     public ScanHistoryEntry attachImportDetails(String localPath, ScanImportDetails details) throws IOException {
-        ScanHistoryEntry current = history.entries().stream()
-            .filter(entry -> entry.localPath().equals(localPath))
-            .findFirst()
-            .orElseThrow(() -> new IOException("Scan history entry was not found for import details."));
-        ScanHistoryEntry updated = new ScanHistoryEntry(
-            current.title(),
-            current.source(),
-            current.wide(),
-            current.tall(),
-            current.missingMaps(),
-            current.localPath(),
-            details.importId() == null || details.importId().isBlank() ? current.importId() : details.importId(),
-            details.createdArtId(),
-            current.uploadedSha256(),
-            current.uploadedAt(),
-            current.createdAt()
-        );
-        upsert(updated);
-        return updated;
+        return update(localPath, "Scan history entry was not found for import details.", current ->
+            new ScanHistoryEntry(
+                current.title(), current.source(), current.wide(), current.tall(), current.missingMaps(),
+                current.localPath(),
+                details.importId() == null || details.importId().isBlank() ? current.importId() : details.importId(),
+                details.createdArtId(), current.uploadedSha256(), current.uploadedAt(), current.createdAt()
+            ));
     }
 
     public ScanHistoryEntry rename(String localPath, MapScanDraft draft, String newLocalPath) throws IOException {
-        ScanHistoryEntry current = history.entries().stream()
-            .filter(entry -> entry.localPath().equals(localPath))
-            .findFirst()
-            .orElseThrow(() -> new IOException("Scan history entry was not found for rename."));
-        ScanHistoryEntry updated = new ScanHistoryEntry(
-            draft.title(),
-            draft.source(),
-            draft.wide(),
-            draft.tall(),
-            draft.missingMaps(),
-            newLocalPath,
-            current.importId(),
-            current.createdArtId(),
-            current.uploadedSha256(),
-            current.uploadedAt(),
-            current.createdAt()
-        );
-        upsert(updated);
-        return updated;
+        return update(localPath, "Scan history entry was not found for rename.", current ->
+            new ScanHistoryEntry(
+                draft.title(), draft.source(), draft.wide(), draft.tall(), draft.missingMaps(), newLocalPath,
+                current.importId(), current.createdArtId(), current.uploadedSha256(), current.uploadedAt(), current.createdAt()
+            ));
     }
 
     public boolean remove(String localPath) throws IOException {
-        boolean removed = history.entries().removeIf(entry -> entry.localPath().equals(localPath));
-        if (!removed) return false;
-        save();
-        return true;
+        return AtomicFiles.withLock(path, () -> {
+            StoredScanHistory latest = readStored(path);
+            List<ScanHistoryEntry> updated = new ArrayList<>(latest.entries());
+            boolean removed = updated.removeIf(entry -> entry.localPath().equals(localPath));
+            if (!removed) {
+                history = latest;
+                return false;
+            }
+            StoredScanHistory next = new StoredScanHistory(updated);
+            AtomicFiles.writePrivateUtf8(path, GSON.toJson(next));
+            history = next;
+            return true;
+        });
     }
 
-    private void upsert(ScanHistoryEntry entry) throws IOException {
+    private ScanHistoryEntry upsert(ScanHistoryEntry entry) throws IOException {
+        return AtomicFiles.withLock(path, () -> {
+            StoredScanHistory latest = readStored(path);
+            StoredScanHistory next = upsertState(latest, entry, entry.localPath());
+            AtomicFiles.writePrivateUtf8(path, GSON.toJson(next));
+            history = next;
+            return entry;
+        });
+    }
+
+    private ScanHistoryEntry update(
+        String localPath,
+        String missingMessage,
+        Function<ScanHistoryEntry, ScanHistoryEntry> mutation
+    ) throws IOException {
+        return AtomicFiles.withLock(path, () -> {
+            StoredScanHistory latest = readStored(path);
+            ScanHistoryEntry current = latest.entries().stream()
+                .filter(entry -> entry.localPath().equals(localPath))
+                .findFirst()
+                .orElseThrow(() -> new IOException(missingMessage));
+            ScanHistoryEntry updated = mutation.apply(current);
+            StoredScanHistory next = upsertState(latest, updated, localPath);
+            AtomicFiles.writePrivateUtf8(path, GSON.toJson(next));
+            history = next;
+            return updated;
+        });
+    }
+
+    private static StoredScanHistory upsertState(
+        StoredScanHistory source,
+        ScanHistoryEntry entry,
+        String replacedLocalPath
+    ) {
         List<ScanHistoryEntry> updated = new ArrayList<>();
         updated.add(entry);
-        for (ScanHistoryEntry existing : history.entries()) {
-            if (!existing.localPath().equals(entry.localPath())) {
+        for (ScanHistoryEntry existing : source.entries()) {
+            if (!existing.localPath().equals(entry.localPath())
+                && !existing.localPath().equals(replacedLocalPath)) {
                 updated.add(existing);
             }
             if (updated.size() >= MAX_ENTRIES) break;
         }
-        history = new StoredScanHistory(updated);
-        save();
-    }
-
-    private void save() throws IOException {
-        Files.createDirectories(path.getParent());
-        try (Writer writer = Files.newBufferedWriter(path)) {
-            GSON.toJson(history, writer);
-        }
+        return new StoredScanHistory(updated);
     }
 
     private record StoredScanHistory(List<ScanHistoryEntry> entries) {

@@ -114,14 +114,13 @@ public final class CompanionConfig {
     }
 
     private void save(Path path) throws IOException {
-        Files.createDirectories(path.getParent());
         JsonObject json = new JsonObject();
         json.addProperty("supabaseUrl", supabaseUrl);
         json.addProperty("supabaseAnonKey", supabaseAnonKey);
         json.addProperty("siteUrl", siteUrl);
         json.addProperty("language", language);
         json.addProperty("gatewayUrl", gatewayUrl);
-        Files.writeString(path, GSON.toJson(json), StandardCharsets.UTF_8);
+        AtomicFiles.writePrivateUtf8(path, GSON.toJson(json));
     }
 
     private static String stringField(JsonObject json, String field, String fallback) {

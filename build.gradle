@@ -50,6 +50,10 @@ def target = targets[targetMinecraft]
 if (target == null) {
     throw new GradleException("Unsupported minecraft_version '${targetMinecraft}'. Supported targets: ${targets.keySet().join(', ')}")
 }
+def uiLabEnabled = providers.gradleProperty('mapkluss_ui_lab').orElse('false').get().toBoolean()
+def uiLabJavaHome = providers.gradleProperty('mapkluss_ui_lab_java_home').orNull
+def uiLabJavaExecutable = providers.gradleProperty('mapkluss_ui_lab_java_executable').orNull
+def uiLabCaptureOnOpen = providers.gradleProperty('mapkluss_ui_lab_capture_on_open').orElse('false').get()
 
 apply plugin: target.unobfuscated ? 'net.fabricmc.fabric-loom' : 'net.fabricmc.fabric-loom-remap'
 
@@ -63,6 +67,17 @@ base {
 loom {
     providers.gradleProperty('minecraft_manifest_url').orNull?.with { manifestUrl ->
         customMinecraftManifest.set(manifestUrl)
+    }
+    if (uiLabEnabled) {
+        runs {
+            client {
+                vmArgs '-XX:+AllowEnhancedClassRedefinition'
+                vmArgs '-Xdock:name=MapKluss UI Lab'
+                vmArgs '-Dapple.awt.application.name=MapKluss UI Lab'
+                vmArgs '-Dmapkluss.uiLab.autoOpen=true'
+                vmArgs "-Dmapkluss.uiLab.captureOnOpen=${uiLabCaptureOnOpen}"
+            }
+        }
     }
 }
 
@@ -88,6 +103,9 @@ dependencies {
         modImplementation "net.fabricmc.fabric-api:fabric-key-binding-api-v1:1.1.7+4fc5413f3e"
         modImplementation "net.fabricmc.fabric-api:fabric-lifecycle-events-v1:2.6.15+4ebb5c083e"
         modImplementation "net.fabricmc.fabric-api:fabric-rendering-v1:16.2.6+1fb1cde93e"
+        if (uiLabEnabled) {
+            modRuntimeOnly "net.fabricmc.fabric-api:fabric-api:0.141.4+1.21.11"
+        }
     } else {
         modImplementation "net.fabricmc.fabric-api:fabric-api-base:0.5.0+cd8c0daa2c"
         modImplementation "net.fabricmc.fabric-api:fabric-key-binding-api-v1:1.0.65+946bf4c32c"
@@ -102,6 +120,9 @@ dependencies {
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(target.java)
+        if (uiLabEnabled) {
+            vendor = JvmVendorSpec.JETBRAINS
+        }
     }
     withSourcesJar()
 }
@@ -111,6 +132,15 @@ sourceSets {
         java {
             target.minecraftSources.each { sourceName -> srcDir "src/${sourceName}/java" }
             srcDir "src/${target.compatSources}/java"
+            if (uiLabEnabled) {
+                srcDir 'src/uiLabShared/java'
+                srcDir target.unobfuscated ? 'src/uiLab262/java' : 'src/uiLabLegacy/java'
+            }
+        }
+        resources {
+            if (uiLabEnabled) {
+                srcDir 'src/uiLab/resources'
+            }
         }
     }
     test {
@@ -123,6 +153,25 @@ sourceSets {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release = target.java
+}
+
+tasks.withType(JavaExec).configureEach {
+    if (uiLabEnabled && uiLabJavaHome != null && name == 'runClient') {
+        def uiLabExecutableFile = layout.file(providers.provider {
+            file(uiLabJavaExecutable ?: "${uiLabJavaHome}/bin/java")
+        })
+        def uiLabBaseLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(target.java)
+            vendor = JvmVendorSpec.JETBRAINS
+        }
+        javaLauncher.set(providers.provider {
+            def baseLauncher = uiLabBaseLauncher.get()
+            [
+                getExecutablePath: { uiLabExecutableFile.get() },
+                getMetadata: { baseLauncher.metadata },
+            ] as org.gradle.jvm.toolchain.JavaLauncher
+        })
+    }
 }
 
 test {
@@ -140,4 +189,24 @@ processResources {
     filesMatching('mapkluss-companion.mixins.json') {
         expand 'mixin_compatibility': "JAVA_${target.java}"
     }
+}
+
+tasks.register('verifyProductionJarExcludesUiLab') {
+    dependsOn tasks.named('jar')
+    onlyIf { !uiLabEnabled }
+    doLast {
+        def labEntries = zipTree(tasks.named('jar').get().archiveFile.get().asFile)
+            .matching {
+                include 'art/mapkluss/companion/MapKlussUiLab*.class'
+                include 'assets/mapkluss-ui-lab/**'
+            }
+            .files
+        if (!labEntries.isEmpty()) {
+            throw new GradleException("Production JAR contains MapKluss UI Lab classes: ${labEntries}")
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('verifyProductionJarExcludesUiLab')
 }

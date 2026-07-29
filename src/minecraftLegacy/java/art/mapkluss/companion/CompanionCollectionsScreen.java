@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 public final class CompanionCollectionsScreen extends Screen {
+    private static final int PANEL_WIDTH = 1120;
     private static final int ROWS = 8;
     private static final int LIST_Y = 156;
     private static final int ROW_HEIGHT = 24;
@@ -47,7 +48,7 @@ public final class CompanionCollectionsScreen extends Screen {
     }
 
     private void rebuildControls() {
-        int panelWidth = MapKlussUi.panelWidth(width, 392);
+        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
         int gap = 4;
         int searchButtonWidth = 58;
@@ -70,24 +71,24 @@ public final class CompanionCollectionsScreen extends Screen {
         createInput.setChangedListener(value -> createDraft = value);
         addDrawableChild(createInput);
         addDrawableChild(MapKlussButton.builder(Text.literal("Создать"), button -> createCollection())
-            .dimensions(left + createWidth + gap, 110, createButtonWidth, 20).build());
+            .gold().dimensions(left + createWidth + gap, 110, createButtonWidth, 20).build());
 
         if (sideRailLayout(panelWidth, left)) {
             int railLeft = sideRailLeft(panelWidth, left);
             addDrawableChild(MapKlussButton.builder(Text.literal("Обновить"), button -> loadCollections())
-                .dimensions(railLeft, 80, SIDE_RAIL_WIDTH, 20).build());
+                .technical().dimensions(railLeft, 80, SIDE_RAIL_WIDTH, 20).build());
             pageButton = addDrawableChild(MapKlussButton.builder(pageButtonText(), button -> nextPage())
                 .dimensions(railLeft, 106, SIDE_RAIL_WIDTH, 20).build());
             addDrawableChild(MapKlussButton.builder(Text.literal("Сайт облака"), button -> openCollectionsSite())
-                .dimensions(railLeft, 164, SIDE_RAIL_WIDTH, 20).build());
+                .technical().dimensions(railLeft, 164, SIDE_RAIL_WIDTH, 20).build());
         } else {
             int buttonWidth = Math.max(48, (panelWidth - gap * 2) / 3);
             addDrawableChild(MapKlussButton.builder(Text.literal("Обновить"), button -> loadCollections())
-                .dimensions(left, height - 58, buttonWidth, 20).build());
+                .technical().dimensions(left, height - 58, buttonWidth, 20).build());
             pageButton = addDrawableChild(MapKlussButton.builder(pageButtonText(), button -> nextPage())
                 .dimensions(left + buttonWidth + gap, height - 58, buttonWidth, 20).build());
             addDrawableChild(MapKlussButton.builder(Text.literal("Облако"), button -> openCollectionsSite())
-                .dimensions(left + (buttonWidth + gap) * 2, height - 58, buttonWidth, 20).build());
+                .technical().dimensions(left + (buttonWidth + gap) * 2, height - 58, buttonWidth, 20).build());
         }
         addDrawableChild(MapKlussUi.languageButton(this));
         addDrawableChild(MapKlussUi.backButton(this, parent, left));
@@ -149,7 +150,7 @@ public final class CompanionCollectionsScreen extends Screen {
     }
 
     private void rebuildCollectionButtons() {
-        int panelWidth = MapKlussUi.panelWidth(width, 392);
+        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int x = screenLeft(panelWidth);
         int y = LIST_Y;
         int w = panelWidth;
@@ -199,10 +200,11 @@ public final class CompanionCollectionsScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        int panelWidth = MapKlussUi.panelWidth(width, 392);
+        MapKlussUi.drawBackdrop(context, width, height);
+        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
         boolean sideRail = sideRailLayout(panelWidth, left);
-        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 10, MapKlussUi.panelBottom(height));
+        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 46, MapKlussUi.panelBottom(height));
         if (sideRail) {
             int railLeft = sideRailLeft(panelWidth, left);
             MapKlussUi.drawPanelAt(context, railLeft - 8, railLeft + SIDE_RAIL_WIDTH + 8, 46, MapKlussUi.panelBottom(height));
@@ -232,7 +234,7 @@ public final class CompanionCollectionsScreen extends Screen {
     }
 
     private void drawActionGroup(DrawContext context) {
-        int panelWidth = MapKlussUi.panelWidth(width, 392);
+        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
         MapKlussUi.drawActionGroupLabel(context, textRenderer, "Управление", left, panelWidth, height - 58, 20);
     }
@@ -263,7 +265,7 @@ public final class CompanionCollectionsScreen extends Screen {
                 for (CompanionCollection existing : collections) {
                     if (!existing.id().equals(created.id())) updated.add(existing);
                 }
-                runtime.libraryCache().writeCollections(runtime.sessionStore().userId(), updated);
+                runtime.libraryCache().upsertCollection(runtime.sessionStore().userId(), created);
                 runOnClient(() -> {
                     collections.clear();
                     collections.addAll(updated);
@@ -354,13 +356,13 @@ public final class CompanionCollectionsScreen extends Screen {
     }
 
     private int bottomReserved() {
-        int panelWidth = MapKlussUi.panelWidth(width, 392);
+        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
         int left = screenLeft(panelWidth);
         return sideRailLayout(panelWidth, left) ? 34 : 66;
     }
 
     private boolean sideRailLayout(int panelWidth, int left) {
-        return height >= 360 && MapKlussUi.rightRailFits(width, panelWidth, SIDE_RAIL_WIDTH, SIDE_RAIL_GAP);
+        return false;
     }
 
     private int sideRailLeft(int panelWidth, int left) {
@@ -368,7 +370,7 @@ public final class CompanionCollectionsScreen extends Screen {
     }
 
     private int screenLeft(int panelWidth) {
-        return MapKlussUi.leftWithRightRail(width, panelWidth, SIDE_RAIL_WIDTH, SIDE_RAIL_GAP);
+        return MapKlussUi.centeredLeft(width, panelWidth);
     }
 
     private List<CompanionCollection> filteredCollections() {

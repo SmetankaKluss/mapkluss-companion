@@ -14,7 +14,8 @@ public final class FrameWallGeometry {
             case SOUTH -> new Coord(pos.getZ(), pos.getX(), pos.getY());
             case EAST -> new Coord(pos.getX(), -pos.getZ(), pos.getY());
             case WEST -> new Coord(pos.getX(), pos.getZ(), pos.getY());
-            default -> throw new IllegalArgumentException("Item-frame wall must be horizontal");
+            case UP -> new Coord(pos.getY(), pos.getX(), -pos.getZ());
+            case DOWN -> new Coord(pos.getY(), -pos.getX(), -pos.getZ());
         };
     }
 
@@ -24,7 +25,8 @@ public final class FrameWallGeometry {
             case SOUTH -> new BlockPos(coord.x(), coord.y(), coord.plane());
             case EAST -> new BlockPos(coord.plane(), coord.y(), -coord.x());
             case WEST -> new BlockPos(coord.plane(), coord.y(), coord.x());
-            default -> throw new IllegalArgumentException("Item-frame wall must be horizontal");
+            case UP -> new BlockPos(coord.x(), coord.plane(), -coord.y());
+            case DOWN -> new BlockPos(-coord.x(), coord.plane(), -coord.y());
         };
     }
 
@@ -39,18 +41,39 @@ public final class FrameWallGeometry {
     }
 
     public static ScanCoord fromScanBlockPos(BlockPos pos, Direction facing) {
-        return switch (facing) {
-            case NORTH -> new ScanCoord(pos.getZ(), pos.getX(), pos.getY());
-            case SOUTH -> new ScanCoord(pos.getZ(), -pos.getX(), pos.getY());
-            case EAST -> new ScanCoord(pos.getX(), pos.getZ(), pos.getY());
-            case WEST -> new ScanCoord(pos.getX(), -pos.getZ(), pos.getY());
-            default -> throw new IllegalArgumentException("Item-frame wall must be horizontal");
-        };
+        return fromScanBlockPos(pos, facing, defaultPlaneUp(facing));
+    }
+
+    public static ScanCoord fromScanBlockPos(BlockPos pos, Direction facing, Direction planeUp) {
+        Direction right = AutoFramePlacement.rightDirection(facing, planeUp);
+        return new ScanCoord(axisCoordinate(pos, facing), project(pos, right), project(pos, planeUp));
     }
 
     public static MapFrameCorner scanCorner(BlockPos pos, Direction facing) {
-        ScanCoord coord = fromScanBlockPos(pos, facing);
-        return new MapFrameCorner(facing, coord.plane(), coord.x(), coord.y());
+        return scanCorner(pos, facing, defaultPlaneUp(facing));
+    }
+
+    public static MapFrameCorner scanCorner(BlockPos pos, Direction facing, Direction planeUp) {
+        ScanCoord coord = fromScanBlockPos(pos, facing, planeUp);
+        return new MapFrameCorner(facing, planeUp, coord.plane(), coord.x(), coord.y());
+    }
+
+    static Direction defaultPlaneUp(Direction facing) {
+        return facing != null && facing.getAxis().isHorizontal() ? Direction.UP : Direction.NORTH;
+    }
+
+    private static int axisCoordinate(BlockPos pos, Direction facing) {
+        return switch (facing.getAxis()) {
+            case X -> pos.getX();
+            case Y -> pos.getY();
+            case Z -> pos.getZ();
+        };
+    }
+
+    private static int project(BlockPos pos, Direction direction) {
+        return pos.getX() * direction.getStepX()
+            + pos.getY() * direction.getStepY()
+            + pos.getZ() * direction.getStepZ();
     }
 
     public record Coord(int plane, int x, int y) {

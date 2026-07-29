@@ -6,7 +6,6 @@ import com.google.gson.reflect.TypeToken;
 
 import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
 import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -61,10 +60,7 @@ public final class InstalledArtifactIndex {
         return entries.removeIf(entry -> entry.artId().equals(artId) && entry.artifactId().equals(artifactId));
     }
 
-    public void save() throws IOException {
-        Files.createDirectories(path.getParent());
-        try (Writer writer = Files.newBufferedWriter(path)) {
-            GSON.toJson(entries, LIST_TYPE, writer);
-        }
+    public synchronized void save() throws IOException {
+        AtomicFiles.writePrivateUtf8(path, GSON.toJson(entries, LIST_TYPE));
     }
 }
