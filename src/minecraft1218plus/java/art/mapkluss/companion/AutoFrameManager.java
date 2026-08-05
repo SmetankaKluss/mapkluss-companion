@@ -42,12 +42,17 @@ public final class AutoFrameManager {
     private PlacementAction action;
     private String status = "AutoFrame готов";
     private int statusTicks;
+    private long mapMappingRevision;
 
     private AutoFrameManager() {
     }
 
     public static AutoFrameManager instance() {
         return INSTANCE;
+    }
+
+    synchronized long mapMappingRevision() {
+        return mapMappingRevision;
     }
 
     public synchronized CompletableFuture<AutoFrameTemplate> prepare(CompanionManifest manifest) {
@@ -554,6 +559,7 @@ public final class AutoFrameManager {
         if (tileIndex >= 0) {
             registry.remember(connection, held.mapId(), template, tileIndex, held.hash());
             registry.save();
+            mapMappingRevision++;
         }
         return new KnownSelection(Optional.of(template), false);
     }
@@ -572,6 +578,7 @@ public final class AutoFrameManager {
                 if (index >= 0) registry.remember(connection, tile.mapId(), template, index, tile.hash());
             }
             registry.save();
+            mapMappingRevision++;
         } catch (IOException error) {
             MapKlussCompanionClient.LOGGER.debug("Could not save AutoFrame map bindings.", error);
         }

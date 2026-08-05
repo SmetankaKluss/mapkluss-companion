@@ -275,7 +275,8 @@ public final class CompanionLibraryScreen extends Screen {
                     return;
                 }
 
-                SyncInstalledResult sync = runtime.syncService().refreshInstalledLitematics();
+                CompanionSyncService syncService = runtime.syncService();
+                CompletableFuture<SyncInstalledResult> syncFuture = CompletableFuture.supplyAsync(syncService::refreshInstalledLitematics);
                 ItemListResponse<CompanionLibraryItem> response = switch (requestedView) {
                     case FAVORITES -> runtime.apiClient().favorites();
                     case RECENT -> runtime.apiClient().recent();
@@ -290,12 +291,17 @@ public final class CompanionLibraryScreen extends Screen {
                     items.clear();
                     items.addAll(loadedItems);
                     page = clampPage(page);
-                    status = "Обновлено: " + loadedItems.size()
-                        + " / схемы " + sync.refreshed() + "/" + sync.checked() + ".";
+                    status = "Обновлено: " + loadedItems.size() + ". Схемы синхронизируются...";
                     clearWidgets();
                     rebuildControls();
                     rebuildArtButtons();
                 });
+                syncFuture.whenComplete((sync, syncError) -> runOnClient(() -> {
+                    if (view != requestedView) return;
+                    status = syncError == null
+                        ? "Обновлено: " + loadedItems.size() + " / схемы " + sync.refreshed() + "/" + sync.checked() + "."
+                        : "Облако обновлено. Синхронизация схем не завершена.";
+                }));
             } catch (Exception e) {
                 if (isAuthFailure(e)) {
                     expireSessionLocally("Сессия истекла. Войдите заново.");

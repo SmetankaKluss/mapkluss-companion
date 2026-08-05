@@ -21,6 +21,7 @@ public class CompanionApiClient {
     private static final int MAX_ARTIFACT_BYTES = 128 * 1024 * 1024;
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
+    private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
     private static final Gson GSON = new Gson();
     private static final Type LIBRARY_LIST = new TypeToken<ItemListResponse<CompanionLibraryItem>>() { }.getType();
     private static final Type COLLECTION_LIST = new TypeToken<ItemListResponse<CompanionCollection>>() { }.getType();
@@ -41,7 +42,7 @@ public class CompanionApiClient {
     }
 
     private CompanionApiClient(String supabaseUrl, String anonKey, CompanionConfig routingConfig) {
-        this.http = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
+        this.http = HTTP;
         this.deviceFunctionsBase = URI.create(stripTrailingSlash(supabaseUrl) + "/functions/v1/companion-device");
         this.modFunctionsBase = URI.create(stripTrailingSlash(supabaseUrl) + "/functions/v1/companion-mod");
         this.anonKey = anonKey;

@@ -30,6 +30,7 @@ public final class MapStackManager {
     private final Set<Integer> updatedMapIds = new HashSet<>();
     private final Set<Integer> validatedMapIds = new HashSet<>();
     private final Set<Integer> failedMapIds = new HashSet<>();
+    private final MapStackScanGate scanGate = new MapStackScanGate();
     private Map<Integer, Decoration> decorations = Map.of();
     private Path runDirectory;
     private MapPreviewStore previewStore;
@@ -59,6 +60,7 @@ public final class MapStackManager {
             updatedMapIds.clear();
             recognitionHandler = null;
             recognitionRequested = false;
+            scanGate.reset();
             dirty = true;
         }
         String nextConnection = client.level == null ? "" : AutoFrameManager.instance().connectionKey(client);
@@ -72,6 +74,7 @@ public final class MapStackManager {
             recognitionHandler = null;
             recognitionRequested = false;
             decorations = Map.of();
+            scanGate.reset();
             dirty = true;
         }
         if (client.player == null || client.level == null || client.gameMode == null) {
@@ -92,7 +95,12 @@ public final class MapStackManager {
         }
         if (scanTicks > 0) scanTicks--;
         if (dirty || scanTicks == 0) {
-            scan(client, nextHandler);
+            int[] slotMapIds = slotMapIds(nextHandler);
+            long mappingRevision = AutoFrameManager.instance().mapMappingRevision();
+            if (scanGate.shouldScan(slotMapIds, mappingRevision, dirty)) {
+                scan(client, nextHandler);
+                scanGate.markScanned(slotMapIds, AutoFrameManager.instance().mapMappingRevision());
+            }
             scanTicks = SCAN_INTERVAL_TICKS;
             dirty = false;
         }
@@ -137,6 +145,7 @@ public final class MapStackManager {
             recognitionHandler = null;
             recognitionRequested = false;
             decorations = Map.of();
+            scanGate.reset();
             dirty = true;
         }
     }
@@ -185,6 +194,16 @@ public final class MapStackManager {
             ));
         }
         decorations = Map.copyOf(next);
+    }
+
+    private static int[] slotMapIds(AbstractContainerMenu currentHandler) {
+        if (currentHandler == null) return new int[0];
+        int[] result = new int[currentHandler.slots.size()];
+        for (int index = 0; index < currentHandler.slots.size(); index++) {
+            Integer mapId = MapArtTiles.mapId(currentHandler.slots.get(index).getItem());
+            result[index] = mapId == null ? -1 : mapId;
+        }
+        return result;
     }
 
     private void finishRecognition(Minecraft client, AbstractContainerMenu currentHandler) {
@@ -413,6 +432,7 @@ public final class MapStackManager {
         validatedMapIds.clear();
         failedMapIds.clear();
         decorations = Map.of();
+        scanGate.reset();
         dirty = true;
     }
 

@@ -10,14 +10,22 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.io.InputStream;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 final class CompanionPreviewTextures {
-    private static final HttpClient HTTP = HttpClient.newHttpClient();
+    private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    private static final ExecutorService DOWNLOADS = Executors.newFixedThreadPool(3, runnable -> {
+        Thread thread = new Thread(runnable, "mapkluss-preview");
+        thread.setDaemon(true);
+        return thread;
+    });
     private static final int MAX_COMPRESSED_BYTES = 16 * 1024 * 1024;
     private static final int MAX_DIMENSION = 4096;
     private static final long MAX_PIXELS = 16_777_216L;
@@ -28,17 +36,19 @@ final class CompanionPreviewTextures {
 
     static PreviewTexture request(CompanionManifest manifest) {
         String url = previewUrl(manifest);
-        return request(url);
+        return request(CompanionPreviewKey.forManifest(manifest, url), url);
     }
 
     static PreviewTexture request(CompanionLibraryItem item) {
         String url = item == null ? null : item.previewUrl();
-        return request(url);
+        return request(CompanionPreviewKey.forLibraryItem(item, url), url);
     }
 
-    private static PreviewTexture request(String url) {
+    private static PreviewTexture request(String cacheKey, String url) {
         if (url == null || url.isBlank()) return PreviewTexture.missing();
-        PreviewTexture texture = TEXTURES.computeIfAbsent(url, PreviewTexture::new);
+        String key = cacheKey == null || cacheKey.isBlank() ? url : cacheKey;
+        PreviewTexture texture = TEXTURES.computeIfAbsent(key, ignored -> new PreviewTexture(key, url));
+        texture.updateUrl(url);
         texture.start();
         return texture;
     }
@@ -55,7 +65,8 @@ final class CompanionPreviewTextures {
     }
 
     static final class PreviewTexture {
-        private final String url;
+        private final String cacheKey;
+        private volatile String url;
         private volatile boolean started;
         private volatile boolean loading;
         private volatile boolean failed;
@@ -63,27 +74,44 @@ final class CompanionPreviewTextures {
         private volatile int imageWidth;
         private volatile int imageHeight;
 
-        private PreviewTexture(String url) {
+        private PreviewTexture(String cacheKey, String url) {
+            this.cacheKey = cacheKey;
             this.url = url;
         }
 
         private static PreviewTexture missing() {
-            PreviewTexture texture = new PreviewTexture("");
+            PreviewTexture texture = new PreviewTexture("", "");
             texture.failed = true;
             return texture;
         }
 
-        void start() {
+        synchronized void updateUrl(String nextUrl) {
+            if (nextUrl == null || nextUrl.isBlank() || nextUrl.equals(url)) return;
+            url = nextUrl;
+            if (failed && !loading) {
+                failed = false;
+                started = false;
+            }
+        }
+
+        synchronized void start() {
             if (started || url.isBlank()) return;
+            String requestedUrl = url;
             started = true;
             loading = true;
-            CompletableFuture.supplyAsync(() -> download(url))
+            CompletableFuture.supplyAsync(() -> download(requestedUrl), DOWNLOADS)
                 .thenAccept(image -> MinecraftClient.getInstance().execute(() -> register(image)))
                 .exceptionally(error -> {
-                    loading = false;
-                    failed = true;
+                    retryAfterFailure(requestedUrl);
                     return null;
                 });
+        }
+
+        private synchronized void retryAfterFailure(String requestedUrl) {
+            loading = false;
+            failed = true;
+            started = false;
+            if (!requestedUrl.equals(url)) start();
         }
 
         boolean ready() {
@@ -114,7 +142,7 @@ final class CompanionPreviewTextures {
             try {
                 imageWidth = image.getWidth();
                 imageHeight = image.getHeight();
-                identifier = Identifier.of("mapkluss-companion", "preview/" + Integer.toUnsignedString(url.hashCode(), 16));
+                identifier = Identifier.of("mapkluss-companion", "preview/" + Integer.toUnsignedString(cacheKey.hashCode(), 16));
                 MinecraftClient.getInstance().getTextureManager().registerTexture(
                     identifier,
                     new NativeImageBackedTexture(image)
@@ -128,7 +156,7 @@ final class CompanionPreviewTextures {
         private static NativeImage download(String url) {
             try {
                 URI uri = CompanionApiClient.requireTrustedDownloadUri(url);
-                HttpRequest request = HttpRequest.newBuilder(uri).GET().build();
+                HttpRequest request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(20)).GET().build();
                 HttpResponse<InputStream> response = HTTP.send(request, HttpResponse.BodyHandlers.ofInputStream());
                 if (response.statusCode() < 200 || response.statusCode() >= 300) {
                     response.body().close();

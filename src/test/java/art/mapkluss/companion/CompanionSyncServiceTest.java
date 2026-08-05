@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -49,5 +50,109 @@ final class CompanionSyncServiceTest {
         CompanionSyncService service = new CompanionSyncService(api, tempDir, index, tempDir.resolve("schematics"));
 
         assertFalse(service.removeLitematicsForArt("missing-art"));
+    }
+
+    @Test
+    void refreshArtDoesNotDownloadAnUnchangedInstalledLitematic() throws Exception {
+        Path schematics = tempDir.resolve("schematics-current");
+        Files.createDirectories(schematics);
+        Path installedFile = schematics.resolve("current.litematic");
+        Files.writeString(installedFile, "already installed");
+
+        CompanionArtifact artifact = artifact("artifact-current", "litematic", "abc");
+        CompanionManifest manifest = manifest("art-current", List.of(artifact));
+        InstalledArtifactIndex index = InstalledArtifactIndex.load(tempDir.resolve("current-installed.json"));
+        index.upsert(new InstalledArtifact(
+            manifest.artId(), artifact.id(), artifact.sha256(), installedFile.toString(), installedFile.getFileName().toString(), 1L
+        ));
+        FakeApi api = new FakeApi(manifest);
+        CompanionSyncService service = new CompanionSyncService(api, tempDir, index, schematics);
+
+        ArtRefreshResult result = service.refreshArt(manifest.artId());
+
+        assertFalse(result.syncedInstalledLitematic());
+        assertEquals(0, api.downloadCount);
+        assertEquals(installedFile.toString(), result.installedArtifact().path());
+    }
+
+    @Test
+    void refreshInstalledDoesNotRedownloadAnUnchangedSplitBundle() throws Exception {
+        Path schematics = tempDir.resolve("schematics-split");
+        Files.createDirectories(schematics);
+        Path first = schematics.resolve("tile-1.litematic");
+        Path second = schematics.resolve("tile-2.litematic");
+        Files.writeString(first, "tile one");
+        Files.writeString(second, "tile two");
+
+        CompanionArtifact whole = artifact("whole", "litematic", "whole-sha");
+        CompanionArtifact bundle = artifact("bundle-current", "litematic_tiles_zip", "bundle-sha");
+        CompanionManifest manifest = manifest("art-split", List.of(whole, bundle));
+        InstalledArtifactIndex index = InstalledArtifactIndex.load(tempDir.resolve("split-installed.json"));
+        index.upsert(new InstalledArtifact(manifest.artId(), bundle.id() + "#1", "tile-1-sha", first.toString(), first.getFileName().toString(), 1L));
+        index.upsert(new InstalledArtifact(manifest.artId(), bundle.id() + "#2", "tile-2-sha", second.toString(), second.getFileName().toString(), 1L));
+        FakeApi api = new FakeApi(manifest);
+        CompanionSyncService service = new CompanionSyncService(api, tempDir, index, schematics);
+
+        SyncInstalledResult result = service.refreshInstalledLitematics();
+
+        assertEquals(1, result.checked());
+        assertEquals(0, result.refreshed());
+        assertEquals(0, result.failed());
+        assertEquals(0, api.downloadCount);
+    }
+
+    private static CompanionArtifact artifact(String id, String kind, String sha256) {
+        return new CompanionArtifact(
+            id,
+            kind,
+            id + ("litematic".equals(kind) ? ".litematic" : ".zip"),
+            "companion/test/" + id,
+            "https://example.invalid/" + id,
+            "application/octet-stream",
+            1,
+            sha256,
+            "2026-08-01T00:00:00Z"
+        );
+    }
+
+    private static CompanionManifest manifest(String artId, List<CompanionArtifact> artifacts) {
+        return new CompanionManifest(
+            artId,
+            "version",
+            "owner",
+            "Fixture",
+            "private",
+            new CompanionManifest.Grid(1, 1),
+            "3d",
+            "1.21.11",
+            "classic",
+            null,
+            false,
+            List.of(),
+            artifacts,
+            "2026-08-01T00:00:00Z"
+        );
+    }
+
+    private static final class FakeApi extends CompanionApiClient {
+        private final CompanionManifest manifest;
+        private int downloadCount;
+
+        private FakeApi(CompanionManifest manifest) {
+            super("https://example.invalid", "anon");
+            this.manifest = manifest;
+        }
+
+        @Override
+        public CompanionManifest manifest(String artId) {
+            assertEquals(manifest.artId(), artId);
+            return manifest;
+        }
+
+        @Override
+        public byte[] downloadArtifact(CompanionArtifact artifact) {
+            downloadCount += 1;
+            throw new AssertionError("unchanged artifacts must not be downloaded");
+        }
     }
 }

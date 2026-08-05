@@ -8,6 +8,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 public final class CompanionSyncService {
@@ -68,6 +69,9 @@ public final class CompanionSyncService {
                 if (usesSplitLitematics(artId)) {
                     CompanionArtifact artifact = manifest.litematicTilesArtifact()
                         .orElseThrow(() -> new IOException("Art has no split litematic artifact"));
+                    if (!findCurrentSplitArtifacts(artId, artifact).isEmpty()) {
+                        continue;
+                    }
                     byte[] bytes = api.downloadArtifact(artifact);
                     verifyArtifact(artifact, bytes);
                     removeLitematicsForArt(artId);
@@ -75,11 +79,11 @@ public final class CompanionSyncService {
                 } else {
                     CompanionArtifact artifact = manifest.litematicArtifact()
                         .orElseThrow(() -> new IOException("Art has no litematic artifact"));
-                    boolean alreadyCurrent = installedIndex.findSameArtifact(artId, artifact.id(), artifact.sha256()).isPresent();
-                    byte[] bytes = api.downloadArtifact(artifact);
-                    if (!alreadyCurrent) {
-                        removeLitematicsForArt(artId);
+                    if (findCurrentInstalledArtifact(artId, artifact).isPresent()) {
+                        continue;
                     }
+                    byte[] bytes = api.downloadArtifact(artifact);
+                    removeLitematicsForArt(artId);
                     litematicInstaller.install(manifest, artifact, bytes);
                 }
                 refreshed++;
@@ -121,6 +125,10 @@ public final class CompanionSyncService {
         if (usesSplitLitematics(artId)) {
             CompanionArtifact artifact = manifest.litematicTilesArtifact()
                 .orElseThrow(() -> new IOException("Art has no split litematic artifact"));
+            List<InstalledArtifact> current = findCurrentSplitArtifacts(artId, artifact);
+            if (!current.isEmpty()) {
+                return new ArtRefreshResult(manifest, current.get(0), false);
+            }
             byte[] bytes = api.downloadArtifact(artifact);
             verifyArtifact(artifact, bytes);
             removeLitematicsForArt(artId);
@@ -129,11 +137,12 @@ public final class CompanionSyncService {
         }
 
         CompanionArtifact artifact = manifest.litematicArtifact().orElseThrow();
-        boolean alreadyCurrent = installedIndex.findSameArtifact(artId, artifact.id(), artifact.sha256()).isPresent();
-        byte[] bytes = api.downloadArtifact(artifact);
-        if (!alreadyCurrent) {
-            removeLitematicsForArt(artId);
+        Optional<InstalledArtifact> current = findCurrentInstalledArtifact(artId, artifact);
+        if (current.isPresent()) {
+            return new ArtRefreshResult(manifest, current.get(), false);
         }
+        byte[] bytes = api.downloadArtifact(artifact);
+        removeLitematicsForArt(artId);
         InstalledArtifact installed = litematicInstaller.install(manifest, artifact, bytes);
         return new ArtRefreshResult(manifest, installed, true);
     }
@@ -202,5 +211,29 @@ public final class CompanionSyncService {
 
     private boolean usesSplitLitematics(String artId) {
         return installedIndex.findByArt(artId).stream().anyMatch(entry -> entry.artifactId().contains("#"));
+    }
+
+    private Optional<InstalledArtifact> findCurrentInstalledArtifact(String artId, CompanionArtifact artifact) {
+        return installedIndex.findSameArtifact(artId, artifact.id(), artifact.sha256())
+            .filter(this::installedFileExists);
+    }
+
+    private List<InstalledArtifact> findCurrentSplitArtifacts(String artId, CompanionArtifact artifact) {
+        List<InstalledArtifact> installed = installedIndex.findByArt(artId);
+        String artifactPrefix = artifact.id() + "#";
+        if (installed.isEmpty() || installed.stream().anyMatch(entry -> (
+            !entry.artifactId().startsWith(artifactPrefix) || !installedFileExists(entry)
+        ))) {
+            return List.of();
+        }
+        return installed;
+    }
+
+    private boolean installedFileExists(InstalledArtifact artifact) {
+        try {
+            return artifact.path() != null && Files.isRegularFile(Path.of(artifact.path()));
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 }
