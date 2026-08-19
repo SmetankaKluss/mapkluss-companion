@@ -44,6 +44,10 @@ Fabric Loader и Fabric API обязательны. Litematica и MaLiLib нео
 
 Каждой версии Minecraft нужен свой JAR. Сборка `26.2` требует Java 25; три цели ветки `1.21.x` — Java 21.
 
+### Приватность
+
+Анонимная статистика включается только после явного согласия. До согласия Companion не создаёт идентификатор телеметрии и не отправляет запросы аналитики. Настройку можно отключить в разделе «Аккаунт»; локальный идентификатор при этом удаляется. В телеметрию никогда не попадают аккаунты, серверы, миры, координаты, арты, ID карт, имена файлов, содержимое инвентаря или тексты ошибок. Подробности описаны в [PRIVACY_RU.md](PRIVACY_RU.md), английская версия находится в [PRIVACY.md](PRIVACY.md).
+
 ### Сборка
 
 Нужна Java 25 для `26.2` и Java 21 для остальных целей. Gradle выбирает нужный toolchain автоматически. Сборки выполняются последовательно:
@@ -80,7 +84,9 @@ Use the commands in the Russian build section to build all targets. The same mat
 
 ## Privacy and network access
 
-Companion is client-only. Account, Cloud, scan, and Lens actions communicate with MapKluss services only when their respective features are used. A bounded startup request checks the public GitHub Releases API for a newer version. Two-layer coordinates, map bindings, cached previews, and local progress remain on the player's device. See [PRIVACY.md](PRIVACY.md) for the complete summary.
+Companion is client-only. Account, Cloud, scan, and Lens actions communicate with MapKluss services only when their respective features are used. A bounded startup request checks the public GitHub Releases API for a newer version. Two-layer coordinates, map bindings, cached previews, and local progress remain on the player's device. See [PRIVACY.md](PRIVACY.md) for the complete English summary or [PRIVACY_RU.md](PRIVACY_RU.md) in Russian.
+
+Anonymous usage statistics are strictly opt-in. Before consent, Companion creates no telemetry identifier and sends no telemetry request. The setting can be disabled later from Account, which also deletes the local identifier. Telemetry never includes accounts, servers, worlds, coordinates, arts, map IDs, file names, inventory contents, or error text.
 
 ## Support and security
 

@@ -5,6 +5,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.resources.Identifier;
 import org.lwjgl.glfw.GLFW;
 
@@ -16,6 +17,7 @@ public final class MapKlussUiLab {
     }
 
     public static void register() {
+        MapKlussUiLabResourceWatcher.start();
         KeyMapping.Category category = KeyMapping.Category.register(
             Identifier.fromNamespaceAndPath(MapKlussCompanionClient.MOD_ID, "ui_lab")
         );
@@ -29,9 +31,11 @@ public final class MapKlussUiLab {
         boolean[] opened = {false};
         int[] readyTicks = {0};
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (autoOpen && !opened[0] && ++readyTicks[0] >= 20) {
-                opened[0] = true;
+            if (autoOpen && !opened[0] && client.gui.screen() instanceof TitleScreen && ++readyTicks[0] >= 20) {
                 open(client, client.gui.screen());
+                opened[0] = true;
+            } else if (!(client.gui.screen() instanceof TitleScreen)) {
+                readyTicks[0] = 0;
             }
             while (key.consumeClick()) {
                 if (client.gui.screen() instanceof MapKlussUiLabScreen lab) {

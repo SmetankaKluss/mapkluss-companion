@@ -6,6 +6,20 @@ Cloud, a server, a world, or personal data.
 
 ## Fast loop
 
+Windows PowerShell:
+
+```powershell
+.\scripts\ui-lab.ps1 1.21.11
+.\scripts\ui-lab.ps1 1.21.11 -Debug
+.\scripts\ui-lab.ps1 26.2 -Debug
+```
+
+The Windows launcher finds a compatible JetBrains Runtime or asks Gradle to
+provision one. `-Debug` also starts continuous compilation and the JDI HotSwap
+watcher.
+
+macOS:
+
 Run the primary lane:
 
 ```bash
@@ -25,8 +39,9 @@ Colors and the first shared layout metrics live in:
 - `src/main/resources/assets/mapkluss-companion/ui/theme.json`
 - `src/main/resources/assets/mapkluss-companion/ui/layout.json`
 
-Edit either file and press `Reload` in UI Lab. The running client applies the
-source JSON directly, without rebuilding a JAR or restarting Minecraft.
+Edit either file and UI Lab reloads it automatically after a short debounce.
+The `Reload` button remains as a manual fallback. The running client applies
+the source JSON directly, without rebuilding a JAR or restarting Minecraft.
 
 ## Java HotSwap
 

@@ -66,7 +66,7 @@ final class MapKlussUiLabScreen extends Screen {
         x += secondWidth + TOOLBAR_GAP;
         addToolbarButton(model.guides() ? "Bounds on" : "Bounds", x, secondTop, secondWidth, model::toggleGuides);
         x += secondWidth + TOOLBAR_GAP;
-        addToolbarButton("Reload", x, secondTop, secondWidth, this::reloadResources);
+        addToolbarButton("GUI · " + model.guiScale().label(), x, secondTop, secondWidth, model::nextGuiScale);
         x += secondWidth + TOOLBAR_GAP;
         addToolbarButton("Capture", x, secondTop, width - 10 - x, this::capture);
     }
@@ -157,7 +157,8 @@ final class MapKlussUiLabScreen extends Screen {
         MapKlussUi.drawStatusIn(context, font, model.status(), frame.centerX(), contentTop + 17, contentWidth - 32);
         if (!model.populated()) {
             MapKlussUi.drawEmptyState(context, font, model.stateLabel(), model.emptyDetail(),
-                contentLeft + 4, contentTop + 30, contentWidth - 8, contentHeight - 34);
+                contentLeft + 4, contentTop + 30, contentWidth - 8, contentHeight - 34,
+                MapKlussUi.statusColor(model.statusKind()));
             return;
         }
 
@@ -185,7 +186,7 @@ final class MapKlussUiLabScreen extends Screen {
             case LOGIN -> renderCard(context, left, top, bodyWidth,
                 model.english() ? "DEVICE SIGN-IN" : "ВХОД НА УСТРОЙСТВЕ", "ABCD-EFGH", MapKlussUi.GOLD);
             case UPDATE -> renderCard(context, left, top, bodyWidth,
-                model.english() ? "UPDATE AVAILABLE" : "ДОСТУПНО ОБНОВЛЕНИЕ", "MapKluss Companion 0.12.0", MapKlussUi.GOLD);
+                model.english() ? "UPDATE AVAILABLE" : "ДОСТУПНО ОБНОВЛЕНИЕ", "MapKluss Companion 0.13.1", MapKlussUi.GOLD);
             case TRACKER -> renderCard(context, left, top, bodyWidth,
                 model.english() ? "BUILD TRACKER" : "ТРЕКЕР СБОРКИ", "White wool · 1248 / 4096", MapKlussUi.CYAN);
             case SCAN -> renderCard(context, left, top, bodyWidth,

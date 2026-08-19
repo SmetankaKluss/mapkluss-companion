@@ -18,6 +18,7 @@ public final class MapRecognitionButton extends MapKlussButton {
             x, y, size, size,
             Text.translatable("button.mapkluss-companion.recognize_maps"),
             button -> onPress.run(),
+            CompanionActionInventory.action("inventory.recognize_maps", "button.mapkluss-companion.recognize_maps"),
             Tone.TECHNICAL,
             false,
             () -> true,

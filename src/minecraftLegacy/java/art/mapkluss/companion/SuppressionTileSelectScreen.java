@@ -9,7 +9,6 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 public final class SuppressionTileSelectScreen extends Screen {
-    private static final int DESIRED_PANEL_WIDTH = 500;
     private static final int BUTTON_HEIGHT = 24;
     private static final int GAP = 6;
 
@@ -30,23 +29,27 @@ public final class SuppressionTileSelectScreen extends Screen {
     protected void init() {
         requests.attach();
         clearChildren();
-        int panelWidth = MapKlussUi.panelWidth(width, DESIRED_PANEL_WIDTH);
-        int left = MapKlussUi.centeredLeft(width, panelWidth);
-        int columns = columns(panelWidth);
-        int rows = visibleRows();
+        CompanionUiLayout.Shell shell = workflowShell();
+        addNavigationControls(shell);
+        CompanionUiLayout.Rect panel = selectionPanel(shell);
+        int innerLeft = panel.x() + 12;
+        int innerWidth = Math.max(1, panel.width() - 24);
+        int columns = columns(innerWidth);
+        int rows = visibleRows(panel);
         int pageSize = columns * rows;
         int pageCount = Math.max(1, (catalog.tiles().size() + pageSize - 1) / pageSize);
         page = Math.max(0, Math.min(page, pageCount - 1));
         int start = page * pageSize;
         int end = Math.min(catalog.tiles().size(), start + pageSize);
-        int buttonWidth = (panelWidth - GAP * (columns - 1)) / columns;
-        int gridTop = gridTop();
+        int buttonWidth = (innerWidth - GAP * (columns - 1)) / columns;
+        int gridTop = gridTop(panel);
         for (int index = start; index < end; index++) {
             SuppressionBundleCatalog.Tile tile = catalog.tiles().get(index);
             int local = index - start;
-            int x = left + (local % columns) * (buttonWidth + GAP);
+            int x = innerLeft + (local % columns) * (buttonWidth + GAP);
             int y = gridTop + (local / columns) * (BUTTON_HEIGHT + GAP);
             addDrawableChild(MapKlussButton.builder(tileLabel(tile), button -> startTile(tile))
+                .action("two_layer.select_part")
                 .special()
                 .tooltip(CompanionI18n.text("Строка " + (tile.row() + 1) + ", столбец " + (tile.column() + 1)))
                 .dimensions(x, y, buttonWidth, BUTTON_HEIGHT)
@@ -54,20 +57,47 @@ public final class SuppressionTileSelectScreen extends Screen {
                 .build());
         }
 
-        int footerY = panelBottom() - 29;
-        int navWidth = 80;
+        int footerY = panel.bottom() - 34;
+        int backWidth = Math.min(88, Math.max(64, innerWidth / 5));
+        addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Назад"), button -> client().setScreen(parent))
+            .action("global.back")
+            .dimensions(innerLeft, footerY, backWidth, 22).enabledWhen(() -> !busy).build());
+        int navWidth = Math.min(80, Math.max(56, innerWidth / 5));
         addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Пред."), button -> changePage(-1))
-            .dimensions(left + 92, footerY, navWidth, 20)
+            .action("two_layer.tile_previous_page")
+            .dimensions(panel.x() + panel.width() / 2 - navWidth - GAP / 2, footerY, navWidth, 22)
             .visibleWhen(() -> pageCount > 1)
             .enabledWhen(() -> !busy && page > 0)
             .build());
         addDrawableChild(MapKlussButton.builder(CompanionI18n.text("След."), button -> changePage(1))
-            .dimensions(left + panelWidth - navWidth, footerY, navWidth, 20)
+            .action("two_layer.tile_next_page")
+            .dimensions(panel.x() + panel.width() / 2 + GAP / 2, footerY, navWidth, 22)
             .visibleWhen(() -> pageCount > 1)
             .enabledWhen(() -> !busy && page + 1 < pageCount)
             .build());
-        addDrawableChild(MapKlussUi.languageButton(this));
-        addDrawableChild(MapKlussUi.backButton(this, parent, left, panelBottom(), () -> !busy));
+        addDrawableChild(MapKlussUi.languageButtonAt(this, shell.topBar().right() - 38, shell.topBar().y() + 9));
+    }
+
+    private void addNavigationControls(CompanionUiLayout.Shell shell) {
+        for (int i = 0; i <= CompanionUiLayout.Destination.ACCOUNT.ordinal(); i++) {
+            CompanionUiLayout.Destination destination = CompanionUiLayout.Destination.values()[i];
+            CompanionUiLayout.Rect rect = CompanionUiLayout.navigationButton(shell, i);
+            addDrawableChild(MapKlussButton.builder(Text.literal(""), button -> openDestination(destination))
+                .action(CompanionActionInventory.navigationAction(destination))
+                .tooltip(CompanionI18n.text(destination.name()))
+                .dimensions(rect.x(), rect.y(), rect.width(), rect.height()).enabledWhen(() -> !busy).build());
+        }
+    }
+
+    private void openDestination(CompanionUiLayout.Destination destination) {
+        switch (destination) {
+            case LIBRARY -> client().setScreen(new CompanionLibraryScreen(parent));
+            case LENS -> client().setScreen(new LensScreen(this));
+            case SCAN -> client().setScreen(new ScanScreen(this));
+            case TRACKER -> client().setScreen(new TrackerOpenScreen(this));
+            case ACCOUNT -> client().setScreen(new CompanionAccountScreen(this));
+            default -> { }
+        }
     }
 
     private void changePage(int delta) {
@@ -106,31 +136,34 @@ public final class SuppressionTileSelectScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        MapKlussUi.drawBackdrop(context, width, height);
-        int panelWidth = MapKlussUi.panelWidth(width, DESIRED_PANEL_WIDTH);
-        int left = MapKlussUi.centeredLeft(width, panelWidth);
-        int bottom = panelBottom();
-        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, panelTop(), bottom);
-        MapKlussUi.drawSectionAt(context, textRenderer, "Части арта", left, panelWidth,
-            gridTop() - 16, Math.max(42, bottom - gridTop() - 30));
-        MapKlussUi.drawLocalHeader(
-            context, textRenderer, "ВЫБЕРИТЕ КАРТУ", "",
-            left - 4, left + panelWidth + 4, panelTop() + 12
+        ScreenViewModel model = screenModel();
+        CompanionUiLayout.Shell shell = MapKlussUi.drawShell(
+            context, textRenderer, width, height, model, false
         );
-        MapKlussUi.drawCenteredIn(
-            context, textRenderer,
-            catalog.gridWide() + "×" + catalog.gridTall() + " · " + catalog.tiles().size() + " карт",
-            width / 2, panelTop() + 34, panelWidth - 24, MapKlussUi.CYAN
-        );
-        int pageSize = columns(panelWidth) * visibleRows();
+        CompanionUiLayout.Rect panel = selectionPanel(shell);
+        MapKlussUi.drawPanelAt(context, panel.x(), panel.right(), panel.y(), panel.bottom());
+        MapKlussUi.drawLeft(context, textRenderer, "Части арта", panel.x() + 12, panel.y() + 12,
+            panel.width() - 24, MapKlussUi.WHITE);
+        MapKlussUi.drawLeft(context, textRenderer,
+            catalog.gridWide() + "×" + catalog.gridTall() + " · " + catalog.tiles().size() + " частей",
+            panel.x() + 12, panel.y() + 29, panel.width() - 24, MapKlussUi.CYAN);
+        int pageSize = columns(panel.width() - 24) * visibleRows(panel);
         int pages = Math.max(1, (catalog.tiles().size() + pageSize - 1) / pageSize);
         if (pages > 1) {
             MapKlussUi.drawCenteredIn(context, textRenderer, "Стр " + (page + 1) + "/" + pages,
-                width / 2, bottom - 24, 100, MapKlussUi.MUTED);
+                panel.x() + panel.width() / 2, panel.bottom() - 28, 100, MapKlussUi.MUTED);
         }
-        MapKlussUi.drawWrappedCenteredIn(context, textRenderer, status, width / 2,
-            bottom - 47, panelWidth - 28, 1, busy ? MapKlussUi.GOLD : MapKlussUi.statusColor(status));
+        MapKlussUi.drawWrappedCenteredIn(context, textRenderer, status, panel.x() + panel.width() / 2,
+            panel.bottom() - 52, panel.width() - 28, 1, MapKlussUi.statusColor(model.statusKind()));
         super.render(context, mouseX, mouseY, delta);
+    }
+
+    private ScreenViewModel screenModel() {
+        return ScreenViewModel.shell(
+            CompanionUiLayout.Destination.TWO_LAYER, "Two-layer",
+            List.of(CompanionI18n.translate("Выбор части")), status,
+            busy ? ScreenViewModel.StatusKind.LOADING : ScreenViewModel.classifyStatus(status)
+        );
     }
 
     @Override
@@ -155,24 +188,25 @@ public final class SuppressionTileSelectScreen extends Screen {
     }
 
     private int columns(int panelWidth) {
-        return panelWidth >= 420 ? 4 : 2;
+        if (panelWidth >= 560) return 4;
+        if (panelWidth >= 360) return 3;
+        return 2;
     }
 
-    private int visibleRows() {
-        return Math.max(2, Math.min(4, (height - 150) / (BUTTON_HEIGHT + GAP)));
+    private int visibleRows(CompanionUiLayout.Rect panel) {
+        return Math.max(1, Math.min(5, (panel.height() - 112) / (BUTTON_HEIGHT + GAP)));
     }
 
-    private int panelTop() {
-        int contentHeight = 118 + visibleRows() * (BUTTON_HEIGHT + GAP);
-        return Math.max(8, (height - contentHeight) / 2);
+    private int gridTop(CompanionUiLayout.Rect panel) {
+        return panel.y() + 50;
     }
 
-    private int panelBottom() {
-        return Math.min(height - 8, panelTop() + 118 + visibleRows() * (BUTTON_HEIGHT + GAP));
+    private CompanionUiLayout.Shell workflowShell() {
+        return CompanionUiLayout.shell(width, height, false);
     }
 
-    private int gridTop() {
-        return panelTop() + 58;
+    private CompanionUiLayout.Rect selectionPanel(CompanionUiLayout.Shell shell) {
+        return CompanionUiLayout.focusedPanel(shell.content(), 680, 320);
     }
 
     private static MinecraftClient client() {

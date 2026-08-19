@@ -94,10 +94,6 @@ final class MapKlussUi {
 
     static void drawBackdrop(GuiGraphicsExtractor context, int screenWidth, int screenHeight) {
         context.fill(0, 0, screenWidth, screenHeight, BACKDROP);
-        context.fill(0, 0, screenWidth, 2, BACKDROP_EDGE);
-        context.fill(0, screenHeight - 2, screenWidth, screenHeight, BACKDROP_EDGE);
-        context.fill(0, 2, 2, screenHeight - 2, BACKDROP_SIDE);
-        context.fill(screenWidth - 2, 2, screenWidth, screenHeight - 2, BACKDROP_SIDE);
     }
 
     static int panelWidth(int screenWidth, int desiredWidth) {
@@ -123,6 +119,128 @@ final class MapKlussUi {
         return CompanionLayout.visibleRows(screenHeight, firstRowY, bottomReserve, rowHeight, maxRows);
     }
 
+    static CompanionUiLayout.Shell drawShell(
+        GuiGraphicsExtractor context,
+        Font renderer,
+        int screenWidth,
+        int screenHeight,
+        CompanionUiLayout.Destination current,
+        String title,
+        String status,
+        boolean inspector
+    ) {
+        return drawShell(context, renderer, screenWidth, screenHeight,
+            ScreenViewModel.shell(current, title, status), inspector, 0);
+    }
+
+    static CompanionUiLayout.Shell drawShell(
+        GuiGraphicsExtractor context, Font renderer, int screenWidth, int screenHeight,
+        ScreenViewModel model, boolean inspector
+    ) {
+        return drawShell(context, renderer, screenWidth, screenHeight, model, inspector, 0);
+    }
+
+    static CompanionUiLayout.Shell drawShell(
+        GuiGraphicsExtractor context,
+        Font renderer,
+        int screenWidth,
+        int screenHeight,
+        CompanionUiLayout.Destination current,
+        String title,
+        String status,
+        boolean inspector,
+        int leadingInset
+    ) {
+        return drawShell(context, renderer, screenWidth, screenHeight,
+            ScreenViewModel.shell(current, title, status), inspector, leadingInset);
+    }
+
+    static CompanionUiLayout.Shell drawShell(
+        GuiGraphicsExtractor context,
+        Font renderer,
+        int screenWidth,
+        int screenHeight,
+        ScreenViewModel model,
+        boolean inspector,
+        int leadingInset
+    ) {
+        drawBackdrop(context, screenWidth, screenHeight);
+        CompanionUiLayout.Shell shell = CompanionUiLayout.shell(screenWidth, screenHeight, inspector);
+        CompanionUiLayout.Rect app = shell.app();
+        context.fill(app.x(), app.y(), app.right(), app.bottom(), CHASSIS);
+        context.fill(app.x(), app.y(), app.right(), app.y() + 1, EDGE_MID);
+        CompanionUiLayout.Rect navigation = shell.navigation();
+        context.fill(navigation.x(), navigation.y(), navigation.right(), navigation.bottom(), PANEL_BG);
+        CompanionUiLayout.Rect topBar = shell.topBar();
+        context.fill(topBar.x(), topBar.y(), topBar.right(), topBar.bottom(), PANEL_BG);
+        context.fill(topBar.x(), topBar.bottom() - 1, topBar.right(), topBar.bottom(), EDGE_MID);
+        CompanionUiLayout.Rect content = shell.content();
+        context.fill(content.x(), content.y(), content.right(), content.bottom(), SECTION_BG);
+        if (shell.hasInspector()) {
+            CompanionUiLayout.Rect inspectorRect = shell.inspector();
+            context.fill(inspectorRect.x(), inspectorRect.y(), inspectorRect.right(), inspectorRect.bottom(), PANEL_RAISED);
+            context.fill(inspectorRect.x(), inspectorRect.y(), inspectorRect.x() + 1, inspectorRect.bottom(), EDGE_MID);
+        }
+        int textLeft = topBar.x() + 12 + Math.max(0, leadingInset);
+        int textRight = topBar.right() - 48;
+        String status = model.status();
+        int statusWidth = status.isBlank()
+            ? 0
+            : CompanionUiLayout.clamp(topBar.width() * 30 / 100, 72, Math.max(72, (textRight - textLeft) / 2));
+        int titleWidth = Math.max(40, textRight - textLeft - statusWidth - (statusWidth > 0 ? 10 : 0));
+        drawLeft(context, renderer, model.heading(), textLeft, topBar.y() + 10, titleWidth, WHITE);
+        if (!status.isBlank()) {
+            drawRight(context, renderer, status, textRight, topBar.y() + 10, statusWidth, statusColor(model.statusKind()));
+        }
+        drawNavigation(context, shell, model.destination());
+        return shell;
+    }
+
+    static void drawNavigation(GuiGraphicsExtractor context, CompanionUiLayout.Shell shell, CompanionUiLayout.Destination current) {
+        for (int i = 0; i <= CompanionUiLayout.Destination.ACCOUNT.ordinal(); i++) {
+            CompanionUiLayout.Destination destination = CompanionUiLayout.Destination.values()[i];
+            CompanionUiLayout.Rect button = CompanionUiLayout.navigationButton(shell, i);
+            boolean selected = destination == current
+                || destination == CompanionUiLayout.Destination.LIBRARY
+                && (current == CompanionUiLayout.Destination.ART || current == CompanionUiLayout.Destination.TWO_LAYER);
+            if (selected) {
+                context.fill(button.x(), button.y(), button.right(), button.bottom(), PANEL_RAISED);
+                if (shell.mode() == CompanionUiLayout.Mode.COMPACT) {
+                    context.fill(button.x() + 5, button.y(), button.right() - 5, button.y() + 2, ACCENT);
+                } else {
+                    context.fill(button.x(), button.y() + 6, button.x() + 2, button.bottom() - 6, ACCENT);
+                }
+            }
+            int iconX = button.x() + (button.width() - 16) / 2;
+            int iconY = button.y() + (button.height() - 16) / 2;
+            drawIcon(context, iconFor(destination), iconX, iconY, selected ? ACCENT : MUTED);
+        }
+    }
+
+    static void drawIcon(GuiGraphicsExtractor context, MapKlussIcon icon, int x, int y, int color) {
+        for (int row = 0; row < 16; row++) {
+            int start = -1;
+            for (int column = 0; column <= 16; column++) {
+                boolean filled = column < 16 && icon.pixel(column, row);
+                if (filled && start < 0) start = column;
+                if (!filled && start >= 0) {
+                    context.fill(x + start, y + row, x + column, y + row + 1, color);
+                    start = -1;
+                }
+            }
+        }
+    }
+
+    private static MapKlussIcon iconFor(CompanionUiLayout.Destination destination) {
+        return switch (destination) {
+            case LIBRARY, ART, TWO_LAYER -> MapKlussIcon.LIBRARY;
+            case LENS -> MapKlussIcon.LENS;
+            case SCAN -> MapKlussIcon.SCAN;
+            case TRACKER -> MapKlussIcon.TRACKER;
+            case ACCOUNT -> MapKlussIcon.ACCOUNT;
+        };
+    }
+
     static void drawPanel(GuiGraphicsExtractor context, int screenWidth, int desiredWidth, int top, int bottom) {
         int panelWidth = panelWidth(screenWidth, desiredWidth);
         int left = centeredLeft(screenWidth, panelWidth) - 10;
@@ -132,18 +250,11 @@ final class MapKlussUi {
 
     static void drawPanelAt(GuiGraphicsExtractor context, int left, int right, int top, int bottom) {
         if (right - left < 12 || bottom - top < 12) return;
-        context.fill(left, top, right, bottom, CHASSIS);
-        context.fill(left, top, right, top + 1, EDGE_HIGHLIGHT);
-        context.fill(left, top, left + 1, bottom, EDGE_HIGHLIGHT);
-        context.fill(left, bottom - 2, right, bottom, EDGE_DARK);
-        context.fill(right - 2, top, right, bottom, EDGE_DARK);
-        context.fill(left + 2, top + 2, right - 2, bottom - 2, EDGE_MID);
-        context.fill(left + 3, top + 3, right - 3, bottom - 3, PANEL_BG);
-        context.fill(left + 4, top + 4, right - 4, top + 5, PANEL_INNER_HIGHLIGHT);
-        context.fill(left + 4, top + 4, left + 5, bottom - 4, PANEL_INNER_HIGHLIGHT);
-        context.fill(left + 4, bottom - 5, right - 4, bottom - 4, PANEL_INNER_SHADOW);
-        context.fill(right - 5, top + 4, right - 4, bottom - 4, PANEL_INNER_SHADOW);
-        drawCornerPins(context, left, right, top, bottom);
+        context.fill(left, top, right, bottom, PANEL_BG);
+        context.fill(left, top, right, top + 1, EDGE_MID);
+        context.fill(left, bottom - 1, right, bottom, EDGE_MID);
+        context.fill(left, top, left + 1, bottom, EDGE_MID);
+        context.fill(right - 1, top, right, bottom, EDGE_MID);
     }
 
     static void drawHeader(GuiGraphicsExtractor context, Font renderer, String title, String subtitle, int screenWidth, int y) {
@@ -153,25 +264,14 @@ final class MapKlussUi {
         int right = Math.max(left + 80, screenWidth - HEADER_INSET);
         int top = Math.max(4, y - HEADER_TITLE_Y_OFFSET);
         int bottom = y + (subtitle == null || subtitle.isBlank() ? 17 : 29);
-        drawRaisedPlate(context, left, top, right, bottom);
-        if (screenWidth >= 420) {
-            drawLeft(context, renderer, "MAPKLUSS", left + HEADER_BRAND_X, y, 96, WHITE);
-        }
-        int titleWidth = Math.max(80, screenWidth - (screenWidth >= 420 ? 250 : 100));
+        context.fill(left, top, right, bottom, PANEL_BG);
+        context.fill(left, bottom - 1, right, bottom, EDGE_MID);
+        int titleWidth = Math.max(80, right - left - LANGUAGE_WIDTH - 28);
         String clippedTitle = clip(renderer, title, titleWidth);
-        int clippedTitleWidth = renderer.width(clippedTitle);
-        int titleCenter = screenWidth / 2;
-        int leftSignal = titleCenter - clippedTitleWidth / 2 - 12;
-        int rightSignal = titleCenter + clippedTitleWidth / 2 + 8;
-        if (leftSignal > left + 114) {
-            context.fill(leftSignal, y + 4, leftSignal + 4, y + 7, CYAN);
-        }
-        if (rightSignal + 4 < right - LANGUAGE_WIDTH - 12) {
-            context.fill(rightSignal, y + 4, rightSignal + 4, y + 7, CYAN);
-        }
-        context.centeredText(renderer, Component.literal(clippedTitle), titleCenter, y, WHITE);
+        context.fill(left + 10, y + 2, left + 12, y + 10, ACCENT);
+        context.text(renderer, MapKlussText.text(clippedTitle), left + 18, y, WHITE);
         if (subtitle != null && !subtitle.isBlank()) {
-            drawCenteredIn(context, renderer, subtitle, screenWidth / 2, y + 14, titleWidth, CYAN);
+            drawRight(context, renderer, subtitle, right - LANGUAGE_WIDTH - 10, y, Math.max(40, titleWidth / 2), MUTED);
         }
     }
 
@@ -189,22 +289,14 @@ final class MapKlussUi {
         int safeRight = Math.max(left + 80, right);
         int top = Math.max(4, y - HEADER_TITLE_Y_OFFSET);
         int bottom = y + (subtitle == null || subtitle.isBlank() ? 17 : 29);
-        drawRaisedPlate(context, left, top, safeRight, bottom);
-        int titleCenter = (left + safeRight) / 2;
-        int titleWidth = Math.max(40, safeRight - left - 44);
+        context.fill(left, top, safeRight, bottom, PANEL_BG);
+        context.fill(left, bottom - 1, safeRight, bottom, EDGE_MID);
+        int titleWidth = Math.max(40, safeRight - left - 32);
         String clippedTitle = clip(renderer, title, titleWidth);
-        int clippedTitleWidth = renderer.width(clippedTitle);
-        int leftSignal = titleCenter - clippedTitleWidth / 2 - 12;
-        int rightSignal = titleCenter + clippedTitleWidth / 2 + 8;
-        if (leftSignal > left + 12) {
-            context.fill(leftSignal, y + 4, leftSignal + 4, y + 7, CYAN);
-        }
-        if (rightSignal + 4 < safeRight - 12) {
-            context.fill(rightSignal, y + 4, rightSignal + 4, y + 7, CYAN);
-        }
-        context.centeredText(renderer, Component.literal(clippedTitle), titleCenter, y, WHITE);
+        context.fill(left + 8, y + 2, left + 10, y + 10, ACCENT);
+        context.text(renderer, MapKlussText.text(clippedTitle), left + 16, y, WHITE);
         if (subtitle != null && !subtitle.isBlank()) {
-            drawCenteredIn(context, renderer, subtitle, titleCenter, y + 14, titleWidth, CYAN);
+            drawRight(context, renderer, subtitle, safeRight - 10, y, Math.max(40, titleWidth / 2), MUTED);
         }
     }
 
@@ -249,6 +341,16 @@ final class MapKlussUi {
         return MUTED;
     }
 
+    static int statusColor(ScreenViewModel.StatusKind kind) {
+        return switch (kind) {
+            case ERROR -> DANGER;
+            case WARNING -> WARNING;
+            case SUCCESS -> SUCCESS;
+            case LOADING -> GOLD;
+            case IDLE -> MUTED;
+        };
+    }
+
     static void drawSection(GuiGraphicsExtractor context, Font renderer, String label, int screenWidth, int desiredWidth, int y, int height) {
         int panelWidth = panelWidth(screenWidth, desiredWidth);
         int left = centeredLeft(screenWidth, panelWidth);
@@ -258,11 +360,11 @@ final class MapKlussUi {
     static void drawSectionAt(GuiGraphicsExtractor context, Font renderer, String label, int left, int panelWidth, int y, int height) {
         if (height <= 0) return;
         int right = left + panelWidth;
-        drawInsetWell(context, left - 2, y, right + 2, y + height);
+        context.fill(left, y, right, y + height, SECTION_BG);
+        context.fill(left, y, right, y + 1, SECTION_BORDER);
         if (label != null && !label.isBlank()) {
             label = CompanionI18n.translate(label);
-            context.fill(left + 5, y + 4, Math.min(right - 5, left + 12), y + 11, BRASS);
-            drawLeft(context, renderer, label.toUpperCase(), left + SECTION_LABEL_X, y + 5, panelWidth - 26, CYAN);
+            drawLeft(context, renderer, label.toUpperCase(), left + SECTION_LABEL_X, y + 6, panelWidth - 20, MUTED);
         }
     }
 
@@ -277,14 +379,14 @@ final class MapKlussUi {
     ) {
         if (label != null && !label.isBlank()) {
             label = CompanionI18n.translate(label);
-            context.fill(left, rowY - 7, left + 5, rowY - 5, BRASS);
-            drawLeft(context, renderer, label.toUpperCase(), left + 9, rowY - 12, panelWidth - 11, CYAN);
+            context.fill(left, rowY - 4, left + panelWidth, rowY - 3, SECTION_BORDER);
+            drawLeft(context, renderer, label.toUpperCase(), left, rowY - 14, panelWidth, MUTED);
         }
     }
 
     static Component clippedText(Font renderer, String value, int maxWidth) {
         value = CompanionI18n.translate(value);
-        return Component.literal(clip(renderer, value, maxWidth));
+        return MapKlussText.text(clip(renderer, value, maxWidth));
     }
 
     static void drawCentered(GuiGraphicsExtractor context, Font renderer, Component text, int screenWidth, int y, int color) {
@@ -311,6 +413,20 @@ final class MapKlussUi {
         int width,
         int height
     ) {
+        drawEmptyState(context, renderer, title, detail, left, top, width, height, ACCENT);
+    }
+
+    static void drawEmptyState(
+        GuiGraphicsExtractor context,
+        Font renderer,
+        String title,
+        String detail,
+        int left,
+        int top,
+        int width,
+        int height,
+        int titleColor
+    ) {
         if (height < 42) return;
         title = CompanionI18n.translate(title);
         detail = CompanionI18n.translate(detail);
@@ -319,7 +435,7 @@ final class MapKlussUi {
         int cardLeft = left + (width - cardWidth) / 2;
         int cardTop = top + Math.max(18, (height - cardHeight) / 3);
         drawInsetWell(context, cardLeft, cardTop, cardLeft + cardWidth, cardTop + cardHeight);
-        drawCenteredIn(context, renderer, title, cardLeft + cardWidth / 2, cardTop + 9, cardWidth - 14, ACCENT);
+        drawCenteredIn(context, renderer, title, cardLeft + cardWidth / 2, cardTop + 9, cardWidth - 14, titleColor);
         if (detail != null && !detail.isBlank()) {
             drawCenteredIn(context, renderer, detail, cardLeft + cardWidth / 2, cardTop + 25, cardWidth - 14, MUTED);
         }
@@ -333,7 +449,8 @@ final class MapKlussUi {
     static void drawRight(GuiGraphicsExtractor context, Font renderer, String value, int right, int y, int maxWidth, int color) {
         value = CompanionI18n.translate(value);
         String clipped = clip(renderer, value, maxWidth);
-        context.text(renderer, Component.literal(clipped), right - renderer.width(clipped), y, color);
+        Component text = MapKlussText.text(clipped);
+        context.text(renderer, text, right - renderer.width(text), y, color);
     }
 
     static void drawFieldLabel(GuiGraphicsExtractor context, Font renderer, String value, int x, int inputY, int maxWidth) {
@@ -343,21 +460,17 @@ final class MapKlussUi {
 
     static void drawPreviewWell(GuiGraphicsExtractor context, int left, int top, int right, int bottom) {
         if (right - left < 12 || bottom - top < 12) return;
-        context.fill(left, top, right, bottom, EDGE_DARK);
-        context.fill(left + 1, top + 1, right - 1, bottom - 1, EDGE_MID);
-        context.fill(left + 3, top + 3, right - 3, bottom - 3, PANEL_INSET);
-        context.fill(left + 3, top + 3, right - 3, top + 4, PREVIEW_INNER_DARK);
-        context.fill(left + 3, top + 3, left + 4, bottom - 3, PREVIEW_INNER_DARK);
-        context.fill(left + 3, bottom - 4, right - 3, bottom - 3, PREVIEW_INNER_LIGHT);
-        context.fill(right - 4, top + 3, right - 3, bottom - 3, PREVIEW_INNER_LIGHT);
-        drawCornerPins(context, left, right, top, bottom);
+        context.fill(left, top, right, bottom, PANEL_INSET);
+        context.fill(left, top, right, top + 1, EDGE_MID);
+        context.fill(left, bottom - 1, right, bottom, EDGE_MID);
+        context.fill(left, top, left + 1, bottom, EDGE_MID);
+        context.fill(right - 1, top, right, bottom, EDGE_MID);
     }
 
     static void drawDataStrip(GuiGraphicsExtractor context, int left, int right, int top, int bottom) {
         if (right - left < 8 || bottom - top < 8) return;
-        drawInsetWell(context, left, top, right, bottom);
-        context.fill(left + 6, top + 5, left + 9, top + 8, CYAN);
-        context.fill(right - 9, bottom - 8, right - 6, bottom - 5, BRASS);
+        context.fill(left, top, right, bottom, PANEL_RAISED);
+        context.fill(left, top, right, top + 1, EDGE_MID);
     }
 
     static AbstractWidget languageButton(Screen screen) {
@@ -374,6 +487,7 @@ final class MapKlussUi {
                     MapKlussCompanionClient.LOGGER.warn("Failed to toggle MapKluss Companion language.", e);
                 }
             })
+            .action("global.language")
             .dimensions(x, y, LANGUAGE_WIDTH, 18)
             .build();
     }
@@ -388,6 +502,7 @@ final class MapKlussUi {
 
     static AbstractWidget backButton(Screen screen, Screen parent, int pageLeft, int panelBottom, BooleanSupplier enabledWhen) {
         return MapKlussButton.builder(CompanionI18n.text("Назад"), button -> Minecraft.getInstance().gui.setScreen(parent))
+            .action("global.back")
             .dimensions(
                 pageLeft,
                 CompanionLayout.insidePanelButtonY(panelBottom, CompanionLayout.NAV_BUTTON_HEIGHT),
@@ -424,7 +539,7 @@ final class MapKlussUi {
             boolean lastLine = line == maxLines - 1;
             WrappedLine next = takeLine(renderer, remaining, maxWidth, lastLine);
             if (next.text().isEmpty() || next.consumedChars() <= 0) return;
-            context.centeredText(renderer, Component.literal(next.text()), screenWidth / 2, y + line * 11, color);
+            context.centeredText(renderer, MapKlussText.text(next.text()), screenWidth / 2, y + line * 11, color);
             remaining = remaining.substring(Math.min(remaining.length(), next.consumedChars())).trim();
         }
     }
@@ -446,7 +561,7 @@ final class MapKlussUi {
             boolean lastLine = line == maxLines - 1;
             WrappedLine next = takeLine(renderer, remaining, maxWidth, lastLine);
             if (next.text().isEmpty() || next.consumedChars() <= 0) return;
-            context.centeredText(renderer, Component.literal(next.text()), centerX, y + line * 11, color);
+            context.centeredText(renderer, MapKlussText.text(next.text()), centerX, y + line * 11, color);
             remaining = remaining.substring(Math.min(remaining.length(), next.consumedChars())).trim();
         }
     }
@@ -480,29 +595,17 @@ final class MapKlussUi {
 
     private static void drawRaisedPlate(GuiGraphicsExtractor context, int left, int top, int right, int bottom) {
         context.fill(left, top, right, bottom, PANEL_RAISED);
-        context.fill(left, top, right, top + 1, EDGE_HIGHLIGHT);
-        context.fill(left, top, left + 1, bottom, EDGE_HIGHLIGHT);
-        context.fill(left, bottom - 2, right, bottom, EDGE_DARK);
-        context.fill(right - 2, top, right, bottom, EDGE_DARK);
-        context.fill(left + 2, top + 2, right - 2, bottom - 2, PANEL_BG);
+        context.fill(left, bottom - 1, right, bottom, EDGE_MID);
     }
 
     private static void drawInsetWell(GuiGraphicsExtractor context, int left, int top, int right, int bottom) {
         if (right - left < 4 || bottom - top < 4) return;
-        context.fill(left, top, right, bottom, EDGE_DARK);
-        context.fill(left + 1, top + 1, right - 1, bottom - 1, SECTION_BORDER);
-        context.fill(left + 2, top + 2, right - 2, bottom - 2, SECTION_BG);
-        context.fill(left + 2, top + 2, right - 2, top + 3, WELL_INNER_DARK);
-        context.fill(left + 2, top + 2, left + 3, bottom - 2, WELL_INNER_DARK);
-        context.fill(left + 2, bottom - 3, right - 2, bottom - 2, PREVIEW_INNER_LIGHT);
-        context.fill(right - 3, top + 2, right - 2, bottom - 2, PREVIEW_INNER_LIGHT);
+        context.fill(left, top, right, bottom, SECTION_BG);
+        context.fill(left, top, right, top + 1, SECTION_BORDER);
+        context.fill(left, bottom - 1, right, bottom, SECTION_BORDER);
     }
 
     private static void drawCornerPins(GuiGraphicsExtractor context, int left, int right, int top, int bottom) {
-        int pin = BRASS;
-        context.fill(left + 5, top + 5, left + 7, top + 7, pin);
-        context.fill(right - 7, top + 5, right - 5, top + 7, pin);
-        context.fill(left + 5, bottom - 7, left + 7, bottom - 5, pin);
-        context.fill(right - 7, bottom - 7, right - 5, bottom - 5, pin);
+        // Intentionally empty. UI 0.12 removes decorative corner hardware.
     }
 }

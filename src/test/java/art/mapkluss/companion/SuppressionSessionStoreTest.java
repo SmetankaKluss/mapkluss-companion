@@ -101,8 +101,8 @@ final class SuppressionSessionStoreTest {
               "updatedAt": 123
             }
             """.formatted(
-                tempDir.resolve("plan.json"),
-                tempDir.resolve("plan.litematic"),
+                tempDir.resolve("plan.json").toString().replace('\\', '/'),
+                tempDir.resolve("plan.litematic").toString().replace('\\', '/'),
                 "a".repeat(64),
                 "b".repeat(64),
                 "c".repeat(64)

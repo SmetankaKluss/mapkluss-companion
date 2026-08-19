@@ -196,6 +196,10 @@ public final class CompanionSyncService {
         return api.trackerForArt(artId);
     }
 
+    public TrackerForArtResult trackerForArtResult(String artId) throws IOException, InterruptedException {
+        return api.trackerForArtResult(artId);
+    }
+
     public InstalledArtifactIndex installedIndex() {
         return installedIndex;
     }

@@ -19,29 +19,22 @@ class MapKlussButton extends ClickableWidget {
     private static final int KEY_SPACE = 32;
     private static final String ELLIPSIS = "...";
 
-    private static final int BG = 0xF0141820;
-    private static final int BG_HOVER = 0xF0202834;
-    private static final int BG_DISABLED = 0xA00C0E12;
-    private static final int BORDER = 0xFF465260;
-    private static final int BORDER_HOVER = 0xFF57FF6E;
-    private static final int BORDER_FOCUS = 0xFF31D8E8;
-    private static final int EDGE_LIGHT = 0xFF6C7887;
-    private static final int EDGE_DARK = 0xFF050609;
-    private static final int TEXT = 0xFFF0E7D2;
-    private static final int TEXT_DISABLED = 0xFF867C6C;
-    private static final int DANGER_COLOR = 0xFFFF4455;
-    private static final int DANGER_BG = 0xF01B1015;
-    private static final int GOLD_COLOR = 0xFFFFD45A;
-    private static final int GOLD_BG = 0xF01C1910;
-    private static final int EXPORT_COLOR = 0xFFFF784D;
-    private static final int EXPORT_BG = 0xF01E1410;
-    private static final int TECHNICAL_COLOR = 0xFF31D8E8;
-    private static final int TECHNICAL_BG = 0xF00D1B22;
-    private static final int SPECIAL_COLOR = 0xFFBC94FF;
-    private static final int SPECIAL_BG = 0xF0171322;
+    private static final int BG = UiTheme.SURFACE;
+    private static final int BG_HOVER = UiTheme.SURFACE_RAISED;
+    private static final int BG_DISABLED = 0xD00D1014;
+    private static final int BORDER = UiTheme.BORDER;
+    private static final int BORDER_FOCUS = UiTheme.CYAN;
+    private static final int TEXT = UiTheme.TEXT;
+    private static final int TEXT_DISABLED = UiTheme.TEXT_DIM;
+    private static final int DANGER_COLOR = UiTheme.RED;
+    private static final int GOLD_COLOR = UiTheme.LIME;
+    private static final int EXPORT_COLOR = UiTheme.CYAN;
+    private static final int TECHNICAL_COLOR = UiTheme.CYAN;
+    private static final int SPECIAL_COLOR = UiTheme.CYAN;
 
     private final PressAction onPress;
-    private final Tone tone;
+    private final UiAction action;
+    private final Tone legacyTone;
     private final BooleanSupplier visibleWhen;
     private final BooleanSupplier enabledWhen;
     private boolean selected;
@@ -53,14 +46,16 @@ class MapKlussButton extends ClickableWidget {
         int height,
         Text message,
         PressAction onPress,
-        Tone tone,
+        UiAction action,
+        Tone legacyTone,
         boolean selected,
         BooleanSupplier visibleWhen,
         BooleanSupplier enabledWhen
     ) {
         super(x, y, width, height, message);
         this.onPress = onPress;
-        this.tone = tone;
+        this.action = action;
+        this.legacyTone = legacyTone;
         this.selected = selected;
         this.visibleWhen = visibleWhen;
         this.enabledWhen = enabledWhen;
@@ -74,50 +69,62 @@ class MapKlussButton extends ClickableWidget {
         this.selected = selected;
     }
 
+    String actionId() {
+        return action == null ? "" : action.id();
+    }
+
+    UiAction action() {
+        if (action == null) return null;
+        return new UiAction(
+            action.id(),
+            getMessage().getString(),
+            action.kind(),
+            active && enabledWhen.getAsBoolean(),
+            selected,
+            action.tooltip()
+        );
+    }
+
     @Override
     protected void renderWidget(DrawContext context, int mouseX, int mouseY, float delta) {
         if (!visibleWhen.getAsBoolean()) return;
         int x = getX();
         int y = getY();
-        boolean enabled = active && enabledWhen.getAsBoolean();
+        UiAction currentAction = action();
+        boolean enabled = currentAction == null ? active && enabledWhen.getAsBoolean() : currentAction.enabled();
+        boolean actionSelected = currentAction == null ? selected : currentAction.selected();
+        UiActionPresentation presentation = currentAction == null
+            ? UiActionPresentation.from(actionKind(legacyTone))
+            : UiActionPresentation.from(currentAction);
         boolean hot = enabled && (isHovered() || isFocused());
-        int lift = hot ? 1 : 0;
-        y -= lift;
         int right = x + getWidth();
         int bottom = y + getHeight();
-        int accent = tone.accentColor();
-        int normalBorder = selected ? accent : tone.borderColor();
-        int border = enabled ? (hot && !isFocused() ? accent : normalBorder) : 0x55505050;
-        int bg = enabled ? (hot ? tone.hoverBg() : tone.bg()) : BG_DISABLED;
-        int textColor = enabled ? (hot || selected || tone != Tone.DEFAULT ? accent : TEXT) : TEXT_DISABLED;
+        int accent = presentation.accentColor();
+        int bg = enabled ? (hot ? BG_HOVER : BG) : BG_DISABLED;
+        int textColor = enabled ? (!presentation.decorated() && !actionSelected ? TEXT : accent) : TEXT_DISABLED;
 
         context.fill(x, y, right, bottom, bg);
-        context.fill(x, y, right, y + 1, hot ? accent : EDGE_LIGHT);
-        context.fill(x, y, x + 1, bottom, hot ? accent : EDGE_LIGHT);
-        context.fill(x, bottom - 2, right, bottom, EDGE_DARK);
-        context.fill(right - 2, y, right, bottom, EDGE_DARK);
-        context.fill(x + 1, y + 1, right - 1, y + 2, border);
-        context.fill(x + 1, y + 1, x + 2, bottom - 1, border);
+        context.fill(x, y, right, y + 1, BORDER);
+        context.fill(x, bottom - 1, right, bottom, BORDER);
+        context.fill(x, y, x + 1, bottom, BORDER);
+        context.fill(right - 1, y, right, bottom, BORDER);
         if (isFocused() && enabled) {
             context.fill(x - 1, y - 1, right + 1, y, BORDER_FOCUS);
             context.fill(x - 1, bottom, right + 1, bottom + 1, BORDER_FOCUS);
             context.fill(x - 1, y, x, bottom, BORDER_FOCUS);
             context.fill(right, y, right + 1, bottom, BORDER_FOCUS);
         }
-        if (selected) {
-            context.fill(x + 3, y + 3, right - 3, y + 4, accent);
-            context.fill(x + 3, bottom - 4, right - 3, bottom - 3, accent);
-        } else if (tone != Tone.DEFAULT && enabled) {
-            context.fill(x + 3, bottom - 4, right - 3, bottom - 3, tone.underlineColor());
-            context.fill(x + 4, y + 4, x + 7, y + 7, accent);
-        }
-        if (hot) {
-            context.fill(x + 3, bottom - 4, right - 3, bottom - 3, tone.underlineColor());
+        if (actionSelected) {
+            context.fill(x, y + 3, x + 2, bottom - 3, UiTheme.LIME);
+            context.fill(x + 4, bottom - 2, right - 4, bottom - 1, UiTheme.LIME);
+        } else if (presentation.decorated() && enabled) {
+            context.fill(x + 4, y + getHeight() / 2 - 1, x + 6, y + getHeight() / 2 + 1, accent);
         }
 
         TextRenderer renderer = MinecraftClient.getInstance().textRenderer;
-        String clipped = clip(renderer, CompanionI18n.translate(getMessage().getString()), Math.max(0, getWidth() - 10));
-        context.drawCenteredTextWithShadow(renderer, clipped, x + getWidth() / 2, y + (getHeight() - renderer.fontHeight) / 2 + 1, textColor);
+        String label = currentAction == null ? getMessage().getString() : currentAction.label();
+        String clipped = clip(renderer, CompanionI18n.translate(label), Math.max(0, getWidth() - 10));
+        context.drawCenteredTextWithShadow(renderer, MapKlussText.text(clipped), x + getWidth() / 2, y + (getHeight() - renderer.fontHeight) / 2 + 1, textColor);
     }
 
     @Override
@@ -167,17 +174,26 @@ class MapKlussButton extends ClickableWidget {
         return renderer.trimToWidth(value, maxWidth - ellipsisWidth) + ELLIPSIS;
     }
 
+    private static UiAction.Kind actionKind(Tone tone) {
+        return switch (tone) {
+            case GOLD -> UiAction.Kind.PRIMARY;
+            case DANGER -> UiAction.Kind.DANGER;
+            case EXPORT, TECHNICAL, SPECIAL -> UiAction.Kind.TECHNICAL;
+            default -> UiAction.Kind.DEFAULT;
+        };
+    }
+
     interface PressAction {
         void onPress(MapKlussButton button);
     }
 
     enum Tone {
-        DEFAULT(BG, BG_HOVER, BORDER, BORDER_HOVER, 0x8057FF6E),
-        GOLD(GOLD_BG, 0xF02A2510, 0xFF665D2F, GOLD_COLOR, 0xA0FFD45A),
-        DANGER(DANGER_BG, 0xF02B1118, 0xFF68313B, DANGER_COLOR, 0xA0FF4455),
-        EXPORT(EXPORT_BG, 0xF02A1810, 0xFF71402F, EXPORT_COLOR, 0xA0FF784D),
-        TECHNICAL(TECHNICAL_BG, 0xF0122730, 0xFF2E6670, TECHNICAL_COLOR, 0xA031D8E8),
-        SPECIAL(SPECIAL_BG, 0xF0211930, 0xFF5B4775, SPECIAL_COLOR, 0xA0BC94FF);
+        DEFAULT(BG, BG_HOVER, BORDER, UiTheme.LIME, UiTheme.LIME),
+        GOLD(BG, BG_HOVER, BORDER, GOLD_COLOR, UiTheme.LIME),
+        DANGER(BG, BG_HOVER, BORDER, DANGER_COLOR, UiTheme.RED),
+        EXPORT(BG, BG_HOVER, BORDER, EXPORT_COLOR, UiTheme.CYAN),
+        TECHNICAL(BG, BG_HOVER, BORDER, TECHNICAL_COLOR, UiTheme.CYAN),
+        SPECIAL(BG, BG_HOVER, BORDER, SPECIAL_COLOR, UiTheme.CYAN);
 
         private final int bg;
         private final int hoverBg;
@@ -217,6 +233,7 @@ class MapKlussButton extends ClickableWidget {
     static final class Builder {
         private final Text message;
         private final PressAction onPress;
+        private UiAction action;
         private int x;
         private int y;
         private int width = 150;
@@ -238,6 +255,11 @@ class MapKlussButton extends ClickableWidget {
             this.y = y;
             this.width = width;
             this.height = height;
+            return this;
+        }
+
+        Builder action(String actionId) {
+            this.action = CompanionActionInventory.action(actionId, message.getString());
             return this;
         }
 
@@ -292,10 +314,21 @@ class MapKlussButton extends ClickableWidget {
         }
 
         MapKlussButton build() {
-            MapKlussButton button = new MapKlussButton(x, y, width, height, message, onPress, tone, selected, visibleWhen, enabledWhen);
+            if (action != null) {
+                action = new UiAction(
+                    action.id(),
+                    message.getString(),
+                    actionKind(tone),
+                    enabledWhen.getAsBoolean(),
+                    selected,
+                    tooltip == null ? "" : tooltip.getString()
+                );
+            }
+            MapKlussButton button = new MapKlussButton(x, y, width, height, message, onPress, action, tone, selected, visibleWhen, enabledWhen);
             button.setNavigationOrder(navigationOrder);
             if (tooltip != null) button.setTooltip(Tooltip.of(tooltip));
             return button;
         }
+
     }
 }

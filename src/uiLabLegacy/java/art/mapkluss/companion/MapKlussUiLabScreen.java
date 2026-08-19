@@ -70,7 +70,7 @@ final class MapKlussUiLabScreen extends Screen {
             ? (model.english() ? "Bounds on" : "Рамки: вкл")
             : (model.english() ? "Bounds off" : "Рамки: выкл"), x, secondTop, secondWidth, model::toggleGuides);
         x += secondWidth + TOOLBAR_GAP;
-        addToolbarButton(model.english() ? "Reload" : "Обновить", x, secondTop, secondWidth, this::reloadResources);
+        addToolbarButton("GUI · " + model.guiScale().label(), x, secondTop, secondWidth, model::nextGuiScale);
         x += secondWidth + TOOLBAR_GAP;
         addToolbarButton(model.english() ? "Capture" : "Снимок", x, secondTop, width - 10 - x, this::capture);
     }
@@ -205,7 +205,8 @@ final class MapKlussUiLabScreen extends Screen {
                 contentLeft + 4,
                 contentTop + 24,
                 contentWidth - 8,
-                contentHeight - 28
+                contentHeight - 28,
+                MapKlussUi.statusColor(model.statusKind())
             );
             return;
         }
@@ -234,7 +235,9 @@ final class MapKlussUiLabScreen extends Screen {
                 context,
                 textRenderer,
                 row == 1 && model.longCopy()
-                    ? "Очень длинное название арта для проверки узкого интерфейса и корректной обрезки"
+                    ? (model.english()
+                        ? "A very long art title for narrow layout and ellipsis verification"
+                        : "Очень длинное название арта для проверки узкого интерфейса и корректной обрезки")
                     : (model.english() ? "Local fixture art " : "Локальный пример ") + (row + 1),
                 left + 50,
                 y + 8,
@@ -264,7 +267,9 @@ final class MapKlussUiLabScreen extends Screen {
         int infoHeight = Math.min(bodyHeight, 156);
         MapKlussUi.drawDataStrip(context, left, left + infoWidth, top, top + infoHeight);
         MapKlussUi.drawLeft(context, textRenderer, model.longCopy()
-            ? "Северный скалистый утёс · очень длинное название локального примера"
+            ? (model.english()
+                ? "Northern rocky cliff · a very long local fixture title"
+                : "Северный скалистый утёс · очень длинное название локального примера")
             : (model.english() ? "Northern cliff" : "Северный утёс"), left + 14, top + 12, infoWidth - 28, MapKlussUi.WHITE);
         MapKlussUi.drawLeft(context, textRenderer, model.english() ? "FORMAT" : "ФОРМАТ",
             left + 14, top + 38, 72, MapKlussUi.DIM);
@@ -400,7 +405,7 @@ final class MapKlussUiLabScreen extends Screen {
         MapKlussUi.drawPanelAt(context, cardLeft, cardLeft + cardWidth, top, top + 148);
         MapKlussUi.drawLocalHeader(context, textRenderer, model.english() ? "Update available" : "Доступно обновление",
             "", cardLeft + 8, cardLeft + cardWidth - 8, top + 18);
-        MapKlussUi.drawCenteredIn(context, textRenderer, "MapKluss Companion 0.12.0",
+        MapKlussUi.drawCenteredIn(context, textRenderer, "MapKluss Companion 0.13.1",
             cardLeft + cardWidth / 2, top + 64, cardWidth - 28, MapKlussUi.GOLD);
         MapKlussUi.drawCenteredIn(context, textRenderer,
             model.english() ? "New tools and compatibility fixes" : "Новые инструменты и исправления совместимости",

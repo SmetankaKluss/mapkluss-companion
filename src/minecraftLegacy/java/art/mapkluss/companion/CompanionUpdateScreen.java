@@ -10,7 +10,6 @@ import java.net.URI;
 final class CompanionUpdateScreen extends Screen {
     private static final URI TELEGRAM_URI = URI.create("https://t.me/mapkluss");
     private static final URI DOWNLOAD_URI = URI.create("https://mapkluss.art/cloud");
-    private static final int WORKSPACE_WIDTH = 1120;
     private static final int CARD_WIDTH = 420;
     private static final int CARD_HEIGHT = 148;
 
@@ -26,55 +25,37 @@ final class CompanionUpdateScreen extends Screen {
     @Override
     protected void init() {
         clearChildren();
-        int panelWidth = MapKlussUi.panelWidth(width, CARD_WIDTH);
-        int left = MapKlussUi.centeredLeft(width, panelWidth);
-        int top = Math.max(64, (height - CARD_HEIGHT) / 2);
-        int gap = 5;
-        int buttonWidth = (panelWidth - gap * 2) / 3;
-        int buttonY = top + 98;
+        CompanionUiLayout.Rect card = updateCard();
+        int gap = 6;
+        int buttonWidth = (card.width() - 28 - gap * 2) / 3;
+        int buttonY = card.bottom() - 34;
+        int left = card.x() + 14;
 
         addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Telegram"), button -> open(TELEGRAM_URI))
+            .action("update.telegram")
             .technical().dimensions(left, buttonY, buttonWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Скачать мод"), button -> open(DOWNLOAD_URI))
+            .action("update.download")
             .exportAction().dimensions(left + buttonWidth + gap, buttonY, buttonWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Позже"), button -> close())
+            .action("update.dismiss")
             .dimensions(left + (buttonWidth + gap) * 2, buttonY, buttonWidth, 20).build());
     }
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         parent.render(context, mouseX, mouseY, delta);
-        MapKlussUi.drawBackdrop(context, width, height);
-        int workspaceWidth = MapKlussUi.panelWidth(width, WORKSPACE_WIDTH);
-        int workspaceLeft = MapKlussUi.centeredLeft(width, workspaceWidth);
-        MapKlussUi.drawPanelAt(
-            context, workspaceLeft - 10, workspaceLeft + workspaceWidth + 10,
-            46, MapKlussUi.panelBottom(height)
-        );
-        MapKlussUi.drawLocalHeader(
-            context, textRenderer, "Обновление Companion", "",
-            workspaceLeft - 4, workspaceLeft + workspaceWidth + 4, 60
-        );
-        int top = Math.max(64, (height - CARD_HEIGHT) / 2);
-        int panelWidth = MapKlussUi.panelWidth(width, CARD_WIDTH);
-        int left = MapKlussUi.centeredLeft(width, panelWidth);
-        MapKlussUi.drawPanelAt(context, left, left + panelWidth, top, top + CARD_HEIGHT);
-        MapKlussUi.drawSectionAt(context, textRenderer, "Обновление", left, panelWidth, top + 42, 46);
-        MapKlussUi.drawLocalHeader(
-            context, textRenderer, "Доступна новая версия", "",
-            left + 8, left + panelWidth - 8, top + 18
-        );
-        MapKlussUi.drawWrappedCentered(
-            context,
-            textRenderer,
-            "MapKluss Companion " + version + " уже доступен.",
-            width,
-            top + 52,
-            panelWidth - 32,
-            2,
-            MapKlussUi.MUTED
-        );
+        context.fill(0, 0, width, height, UiTheme.SCRIM);
+        CompanionUiLayout.Rect card = updateCard();
+        context.fill(card.x(), card.y(), card.right(), card.bottom(), UiTheme.SURFACE_RAISED);
+        context.fill(card.x(), card.y(), card.x() + 3, card.bottom(), UiTheme.LIME);
+        MapKlussUi.drawLeft(context, textRenderer, "Доступна новая версия", card.x() + 16, card.y() + 18, card.width() - 32, MapKlussUi.WHITE);
+        MapKlussUi.drawLeft(context, textRenderer, "MapKluss Companion " + version + " уже доступен.", card.x() + 16, card.y() + 42, card.width() - 32, MapKlussUi.MUTED);
         super.render(context, mouseX, mouseY, delta);
+    }
+
+    private CompanionUiLayout.Rect updateCard() {
+        return CompanionUiLayout.focusedPanel(new CompanionUiLayout.Rect(0, 0, width, height), CARD_WIDTH, CARD_HEIGHT);
     }
 
     @Override

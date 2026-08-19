@@ -7,7 +7,7 @@ import org.slf4j.LoggerFactory;
 
 public final class MapKlussCompanionClient implements ClientModInitializer {
     public static final String MOD_ID = "mapkluss-companion";
-    public static final String UI_BUILD = "frame-planes-2026-07-23";
+    public static final String UI_BUILD = "companion-ui-0.13.1-2026-08-20";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     @Override
@@ -15,6 +15,7 @@ public final class MapKlussCompanionClient implements ClientModInitializer {
         MapKlussUiResources.register();
         LensRenderBridge.register(LensManager.instance());
         AutoFrameBridge.register(AutoFrameManager.instance());
+        CompanionTelemetryManager.register();
         CompanionUpdateManager.register();
         registerDevelopmentUiLab();
         LOGGER.info("MapKluss Companion initialized for Fabric client. UI build: {}.", UI_BUILD);

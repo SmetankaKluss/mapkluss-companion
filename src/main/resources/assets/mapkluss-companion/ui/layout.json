@@ -1,10 +1,19 @@
 {
   "metrics": {
     "language_width": 34,
-    "back_width": 84,
-    "header_inset": 8,
-    "header_title_y_offset": 9,
-    "header_brand_x": 12,
-    "section_label_x": 18
+    "back_width": 76,
+    "header_inset": 12,
+    "header_title_y_offset": 8,
+    "header_brand_x": 10,
+    "section_label_x": 10,
+    "page_inset_compact": 12,
+    "page_inset_medium": 16,
+    "page_inset_wide": 20,
+    "rail_width": 56,
+    "rail_width_medium": 44,
+    "bottom_nav_height": 34,
+    "top_bar_height": 38,
+    "control_height": 24,
+    "content_gap": 12
   }
 }

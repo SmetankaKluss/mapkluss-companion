@@ -11,6 +11,7 @@ Depending on the features used, Companion may store the following inside the Min
 - downloaded artifact metadata and installed-file indexes;
 - map IDs, colour fingerprints, tile bindings, and compressed map previews;
 - Lens preferences;
+- the anonymous-statistics choice and, only after opt-in, a random local installation identifier;
 - Two-layer plan files, anchor, selected map ID, and build progress;
 - scan and build-tracker history.
 
@@ -32,6 +33,14 @@ Companion connects to MapKluss services for actions initiated by the player or r
 Lens performs no background network or disk work while it is inactive. Active Lens sessions use a bounded heartbeat, Realtime-first updates, and a slower recovery poll.
 
 The update check sends no MapKluss account, art, world, server, inventory, or gameplay data. GitHub receives the ordinary network metadata of an HTTPS request. The last release notice shown is stored locally so the same popup is not repeated.
+
+## Optional anonymous statistics
+
+On first launch, Companion asks whether the player wants to share anonymous usage statistics. No telemetry request is made and no telemetry identifier is created before the player explicitly accepts. The choice can be changed in Account at any time. Turning statistics off deletes the local telemetry identifier.
+
+When enabled, Companion may send only one of these event names: launch, completed login, opened library, installed schematic, started Lens, or created tracker. Every event also contains only the Companion version, Minecraft version, interface language, and broad operating-system family. It never contains a MapKluss account, Minecraft server or world, coordinates, art, map ID, file name, inventory contents, or error text.
+
+The service immediately replaces the random installation identifier with a salted hash that changes every UTC day. The original identifier and IP address are not written to the analytics tables. Individual event rows are retained for no more than 30 days; long-term reporting uses daily aggregate counts.
 
 ## Data that remains local
 

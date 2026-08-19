@@ -48,50 +48,45 @@ public final class CompanionCollectionsScreen extends Screen {
     }
 
     private void rebuildControls() {
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
-        int left = screenLeft(panelWidth);
-        int gap = 4;
+        CompanionUiLayout.Shell shell = collectionsShell();
+        CompanionUiLayout.Rect content = shell.content();
+        int left = content.x() + 14;
+        int panelWidth = Math.max(120, content.width() - 28);
+        int gap = 6;
+        int searchY = content.y() + 14;
+        int createY = searchY + 30;
         int searchButtonWidth = 58;
         int searchWidth = Math.max(80, panelWidth - searchButtonWidth * 2 - gap * 2);
-        searchInput = new EditBox(font, left, 76, searchWidth, 20, CompanionI18n.text("Поиск коллекций"));
+        searchInput = new EditBox(font, left, searchY, searchWidth, 22, CompanionI18n.text("Поиск коллекций"));
         searchInput.setMaxLength(80);
         searchInput.setValue(searchQuery);
         searchInput.setResponder(value -> searchQuery = value);
         addRenderableWidget(searchInput);
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Найти"), button -> applySearch())
-            .dimensions(left + searchWidth + gap, 76, searchButtonWidth, 20).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Сброс"), button -> clearSearch())
-            .dimensions(left + searchWidth + searchButtonWidth + gap * 2, 76, searchButtonWidth, 20).build());
+        addRenderableWidget(MapKlussButton.builder(Component.literal("Найти"), button -> applySearch()).action("collections.search")
+            .dimensions(left + searchWidth + gap, searchY, searchButtonWidth, 22).build());
+        addRenderableWidget(MapKlussButton.builder(Component.literal("Сброс"), button -> clearSearch()).action("collections.search_clear")
+            .dimensions(left + searchWidth + searchButtonWidth + gap * 2, searchY, searchButtonWidth, 22).build());
 
         int createButtonWidth = 92;
         int createWidth = Math.max(120, panelWidth - createButtonWidth - gap);
-        createInput = new EditBox(font, left, 110, createWidth, 20, CompanionI18n.text("Новая коллекция"));
+        createInput = new EditBox(font, left, createY, createWidth, 22, CompanionI18n.text("Новая коллекция"));
         createInput.setMaxLength(80);
         createInput.setValue(createDraft);
         createInput.setResponder(value -> createDraft = value);
         addRenderableWidget(createInput);
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Создать"), button -> createCollection())
-            .gold().dimensions(left + createWidth + gap, 110, createButtonWidth, 20).build());
+        addRenderableWidget(MapKlussButton.builder(Component.literal("Создать"), button -> createCollection()).action("collections.create")
+            .selected(true).dimensions(left + createWidth + gap, createY, createButtonWidth, 22).build());
 
-        if (sideRailLayout(panelWidth, left)) {
-            int railLeft = sideRailLeft(panelWidth, left);
-            addRenderableWidget(MapKlussButton.builder(Component.literal("Обновить"), button -> loadCollections())
-                .technical().dimensions(railLeft, 80, SIDE_RAIL_WIDTH, 20).build());
-            pageButton = addRenderableWidget(MapKlussButton.builder(pageButtonText(), button -> nextPage())
-                .dimensions(railLeft, 106, SIDE_RAIL_WIDTH, 20).build());
-            addRenderableWidget(MapKlussButton.builder(Component.literal("Сайт облака"), button -> openCollectionsSite())
-                .technical().dimensions(railLeft, 164, SIDE_RAIL_WIDTH, 20).build());
-        } else {
-            int buttonWidth = Math.max(48, (panelWidth - gap * 2) / 3);
-            addRenderableWidget(MapKlussButton.builder(Component.literal("Обновить"), button -> loadCollections())
-                .technical().dimensions(left, height - 58, buttonWidth, 20).build());
-            pageButton = addRenderableWidget(MapKlussButton.builder(pageButtonText(), button -> nextPage())
-                .dimensions(left + buttonWidth + gap, height - 58, buttonWidth, 20).build());
-            addRenderableWidget(MapKlussButton.builder(Component.literal("Облако"), button -> openCollectionsSite())
-                .technical().dimensions(left + (buttonWidth + gap) * 2, height - 58, buttonWidth, 20).build());
-        }
-        addRenderableWidget(MapKlussUi.languageButton(this));
-        addRenderableWidget(MapKlussUi.backButton(this, parent, left));
+        int actionsY = content.bottom() - 28;
+        int buttonWidth = Math.max(54, (panelWidth - gap * 2) / 3);
+        addRenderableWidget(MapKlussButton.builder(Component.literal("Обновить"), button -> loadCollections()).action("collections.refresh")
+            .technical().dimensions(left, actionsY, buttonWidth, 22).build());
+        pageButton = addRenderableWidget(MapKlussButton.builder(pageButtonText(), button -> nextPage()).action("collections.page_next")
+            .dimensions(left + buttonWidth + gap, actionsY, buttonWidth, 22).build());
+        addRenderableWidget(MapKlussButton.builder(Component.literal("Облако"), button -> openCollectionsSite()).action("collections.open_site")
+            .technical().dimensions(left + (buttonWidth + gap) * 2, actionsY, panelWidth - (buttonWidth + gap) * 2, 22).build());
+        addNavigationControls(shell);
+        addRenderableWidget(MapKlussUi.languageButtonAt(this, shell.topBar().right() - 38, shell.topBar().y() + 9));
         updatePageButton();
         focusCreateInput();
     }
@@ -150,9 +145,10 @@ public final class CompanionCollectionsScreen extends Screen {
     }
 
     private void rebuildCollectionButtons() {
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
-        int x = screenLeft(panelWidth);
-        int y = LIST_Y;
+        CompanionUiLayout.Rect content = collectionsShell().content();
+        int x = content.x() + 14;
+        int panelWidth = Math.max(120, content.width() - 28);
+        int y = listTop();
         int w = panelWidth;
         List<CompanionCollection> visibleCollections = filteredCollections();
         int rows = visibleRows();
@@ -167,7 +163,7 @@ public final class CompanionCollectionsScreen extends Screen {
             addRenderableWidget(MapKlussButton.builder(MapKlussUi.clippedText(font, label, w - 8), button -> {
                 MapKlussCompanionClient.LOGGER.info("Opening collection {} ({}) from collections screen.", collection.name(), collection.id());
                 client().gui.setScreen(new CompanionCollectionItemsScreen(this, collection));
-            })
+            }).action("collections.open")
                 .dimensions(x, rowY, w, 20).build());
         }
     }
@@ -200,23 +196,16 @@ public final class CompanionCollectionsScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
-        MapKlussUi.drawBackdrop(context, width, height);
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
-        int left = screenLeft(panelWidth);
-        boolean sideRail = sideRailLayout(panelWidth, left);
-        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 46, MapKlussUi.panelBottom(height));
-        if (sideRail) {
-            int railLeft = sideRailLeft(panelWidth, left);
-            MapKlussUi.drawPanelAt(context, railLeft - 8, railLeft + SIDE_RAIL_WIDTH + 8, 46, MapKlussUi.panelBottom(height));
-            drawSideRailSections(context, railLeft);
-        }
-        MapKlussUi.drawSectionAt(context, font, null, left, panelWidth, 64, 72);
-        MapKlussUi.drawSectionAt(context, font, "Коллекции", left, panelWidth, LIST_Y - 24, Math.max(42, height - LIST_Y - bottomReserved() + 28));
-        if (!sideRail) drawActionGroup(context);
-        MapKlussUi.drawHeader(context, font, title.getString(), "", width, 16);
-        MapKlussUi.drawStatusIn(context, font, status, left + panelWidth / 2, 38, panelWidth - 16);
-        MapKlussUi.drawFieldLabel(context, font, "Поиск коллекций", left, 76, panelWidth);
-        MapKlussUi.drawFieldLabel(context, font, "Новая коллекция", left, 110, panelWidth);
+        CompanionUiLayout.Shell shell = MapKlussUi.drawShell(
+            context, font, width, height,
+            ScreenViewModel.shell(CompanionUiLayout.Destination.LIBRARY, CompanionI18n.translate("Библиотека"),
+                java.util.List.of(CompanionI18n.translate("Коллекции")), status), false
+        );
+        CompanionUiLayout.Rect content = shell.content();
+        int left = content.x() + 14;
+        int panelWidth = Math.max(120, content.width() - 28);
+        int listY = listTop();
+        MapKlussUi.drawLeft(context, font, "Коллекции", left, listY - 18, panelWidth, MapKlussUi.MUTED);
         boolean empty = filteredCollections().isEmpty();
         if (empty) {
             MapKlussUi.drawEmptyState(
@@ -225,23 +214,13 @@ public final class CompanionCollectionsScreen extends Screen {
                 "Коллекций пока нет",
                 "Создай первую коллекцию или добавь арт позже",
                 left,
-                LIST_Y + 18,
+                listY + 18,
                 panelWidth,
-                Math.max(40, height - LIST_Y - bottomReserved() - 22)
+                Math.max(40, content.bottom() - listY - 64)
             );
         }
         super.extractRenderState(context, mouseX, mouseY, delta);
-    }
-
-    private void drawActionGroup(GuiGraphicsExtractor context) {
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
-        int left = screenLeft(panelWidth);
-        MapKlussUi.drawActionGroupLabel(context, font, "Управление", left, panelWidth, height - 58, 20);
-    }
-
-    private void drawSideRailSections(GuiGraphicsExtractor context, int railLeft) {
-        MapKlussUi.drawSectionAt(context, font, "Список", railLeft, SIDE_RAIL_WIDTH, 60, 78);
-        MapKlussUi.drawSectionAt(context, font, "Сайт", railLeft, SIDE_RAIL_WIDTH, 146, 54);
+        MapKlussUi.drawNavigation(context, shell, CompanionUiLayout.Destination.LIBRARY);
     }
 
     private void createCollection() {
@@ -352,7 +331,7 @@ public final class CompanionCollectionsScreen extends Screen {
     }
 
     private int visibleRows() {
-        return MapKlussUi.visibleRows(height, LIST_Y, bottomReserved(), ROW_HEIGHT, ROWS);
+        return MapKlussUi.visibleRows(height, listTop(), height - collectionsShell().content().bottom() + 40, ROW_HEIGHT, ROWS);
     }
 
     private int bottomReserved() {
@@ -363,6 +342,47 @@ public final class CompanionCollectionsScreen extends Screen {
 
     private boolean sideRailLayout(int panelWidth, int left) {
         return false;
+    }
+
+    private CompanionUiLayout.Shell collectionsShell() {
+        return CompanionUiLayout.shell(width, height, false);
+    }
+
+    private int listTop() {
+        return collectionsShell().content().y() + 86;
+    }
+
+    private void addNavigationControls(CompanionUiLayout.Shell shell) {
+        for (int i = 0; i <= CompanionUiLayout.Destination.ACCOUNT.ordinal(); i++) {
+            CompanionUiLayout.Destination destination = CompanionUiLayout.Destination.values()[i];
+            CompanionUiLayout.Rect rect = CompanionUiLayout.navigationButton(shell, i);
+            addRenderableWidget(MapKlussButton.builder(Component.literal(""), button -> openDestination(destination))
+                .action(CompanionActionInventory.navigationAction(destination))
+                .tooltip(CompanionI18n.text(destinationLabel(destination)))
+                .dimensions(rect.x(), rect.y(), rect.width(), rect.height()).build());
+        }
+    }
+
+    private void openDestination(CompanionUiLayout.Destination destination) {
+        switch (destination) {
+            case LIBRARY -> client().gui.setScreen(new CompanionLibraryScreen(parent));
+            case LENS -> client().gui.setScreen(new LensScreen(this));
+            case SCAN -> client().gui.setScreen(new ScanScreen(this));
+            case TRACKER -> client().gui.setScreen(new TrackerOpenScreen(this));
+            case ACCOUNT -> client().gui.setScreen(new CompanionAccountScreen(this));
+            default -> { }
+        }
+    }
+
+    private String destinationLabel(CompanionUiLayout.Destination destination) {
+        return switch (destination) {
+            case LIBRARY -> "Библиотека";
+            case LENS -> "Lens";
+            case SCAN -> "Скан";
+            case TRACKER -> "Трекер";
+            case ACCOUNT -> "Аккаунт";
+            default -> destination.name();
+        };
     }
 
     private int sideRailLeft(int panelWidth, int left) {

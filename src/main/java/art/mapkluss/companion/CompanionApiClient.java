@@ -174,9 +174,14 @@ public class CompanionApiClient {
     }
 
     public BuildSessionState trackerForArt(String artId) throws IOException, InterruptedException {
+        return trackerForArtResult(artId).session();
+    }
+
+    public TrackerForArtResult trackerForArtResult(String artId) throws IOException, InterruptedException {
         JsonObject payload = newAction("tracker_for_art");
         payload.addProperty("art_id", artId);
-        return post(modFunctionsBase, payload, BuildSessionResponse.class, true).session();
+        BuildSessionResponse response = post(modFunctionsBase, payload, BuildSessionResponse.class, true);
+        return new TrackerForArtResult(response.session(), response.created());
     }
 
     public void updateTracker(String sessionId, JsonObject gathered, JsonObject placed) throws IOException, InterruptedException {

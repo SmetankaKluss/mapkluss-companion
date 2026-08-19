@@ -17,11 +17,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class TrackerSessionScreen extends Screen {
-    private static final int PANEL_WIDTH = 1120;
     private static final Map<String, SerialLatestQueue<TrackerMutation>> SESSION_MUTATIONS = new ConcurrentHashMap<>();
     private static final int MATERIAL_ROWS = 12;
-    private static final int MATERIAL_Y = 168;
-    private static final int MATERIAL_RENDER_Y = 172;
     private static final int MATERIAL_ROW_HEIGHT = 24;
     private static final int ACTION_ROWS = 2;
     private static final int ACTION_ROW_HEIGHT = 34;
@@ -100,34 +97,42 @@ public final class TrackerSessionScreen extends Screen {
         clearWidgets();
         progressInputs.clear();
         scrollOffset = clampScrollOffset(scrollOffset, session);
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
-        int left = screenLeft(panelWidth);
-        int gap = 4;
-        addRenderableWidget(MapKlussUi.languageButton(this));
-        addRenderableWidget(MapKlussUi.backButton(this, parent, left));
+        CompanionUiLayout.Shell shell = trackerShell();
+        CompanionUiLayout.Rect work = trackerWork(shell);
+        int panelWidth = work.width();
+        int left = work.x();
+        int gap = 6;
+        addNavigationControls(shell);
+        addRenderableWidget(MapKlussUi.languageButtonAt(this, shell.topBar().right() - 38, shell.topBar().y() + 9));
         if (loadFailed) {
             int buttonWidth = Math.max(80, (panelWidth - gap) / 2);
-            int actionY = Math.max(64, height - 64);
+            int actionY = work.y() + Math.max(40, work.height() / 2);
             addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Повторить"), button -> load())
+                .action("tracker.retry")
                 .gold().dimensions(left, actionY, buttonWidth, 20).build());
             addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Изменить UUID"), button -> client().gui.setScreen(parent))
+                .action("tracker.change_session")
                 .dimensions(left + buttonWidth + gap, actionY, panelWidth - buttonWidth - gap, 20).build());
             return;
         }
         int searchButtonWidth = 44;
         int hideButtonWidth = Math.max(54, Math.min(82, panelWidth / 4));
         int searchWidth = Math.max(44, panelWidth - searchButtonWidth * 2 - hideButtonWidth - gap * 3);
-        searchInput = new EditBox(font, left, 102, searchWidth, 20, CompanionI18n.text("Поиск материалов"));
+        int searchY = work.y() + 48;
+        searchInput = new EditBox(font, left, searchY, searchWidth, 22, CompanionI18n.text("Поиск материалов"));
         searchInput.setMaxLength(80);
         searchInput.setValue(searchQuery);
         addRenderableWidget(searchInput);
         addRenderableWidget(MapKlussButton.builder(Component.literal("Найти"), button -> applySearch())
-            .dimensions(left + searchWidth + gap, 102, searchButtonWidth, 20).build());
+            .action("tracker.search")
+            .dimensions(left + searchWidth + gap, searchY, searchButtonWidth, 22).build());
         addRenderableWidget(MapKlussButton.builder(Component.literal("Сброс"), button -> clearSearch())
-            .dimensions(left + searchWidth + searchButtonWidth + gap * 2, 102, searchButtonWidth, 20).build());
+            .action("tracker.search_clear")
+            .dimensions(left + searchWidth + searchButtonWidth + gap * 2, searchY, searchButtonWidth, 22).build());
         hideDoneButton = addRenderableWidget(MapKlussButton.builder(hideDoneButtonText(), button -> toggleHideCompleted())
+            .action("tracker.hide_completed")
             .selected(hideCompleted)
-            .dimensions(left + searchWidth + searchButtonWidth * 2 + gap * 3, 102, hideButtonWidth, 20).build());
+            .dimensions(left + searchWidth + searchButtonWidth * 2 + gap * 3, searchY, hideButtonWidth, 22).build());
 
         if (sideRailLayout(panelWidth, left)) {
             addSideRailControls(panelWidth, left);
@@ -143,21 +148,35 @@ public final class TrackerSessionScreen extends Screen {
         int row1 = actionTop();
         int row2 = row1 + ACTION_ROW_HEIGHT;
         addRenderableWidget(MapKlussButton.builder(Component.literal("Сайт"), button -> openTrackerSite())
+            .action("tracker.open_site")
+            .action("tracker.open_site")
             .technical().dimensions(left, row1, threeButtonWidth, 20).build());
         addRenderableWidget(MapKlussButton.builder(Component.literal("Обновить"), button -> load())
+            .action("tracker.refresh")
+            .action("tracker.refresh")
             .technical().dimensions(left + threeButtonWidth + gap, row1, threeButtonWidth, 20).build());
         artButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Арт"), button -> openRelatedArt())
+            .action("tracker.open_art")
+            .action("tracker.open_art")
             .special().dimensions(left + (threeButtonWidth + gap) * 2, row1, panelWidth - (threeButtonWidth + gap) * 2, 20).build());
 
         addRenderableWidget(MapKlussButton.builder(Component.literal("Сбор"), button -> switchMode("gathering"))
+            .action("tracker.status_gathering")
+            .action("tracker.status_gathering")
             .selected(session == null || !"building".equals(session.mode()))
             .dimensions(left, row2, fourButtonWidth, 20).build());
         addRenderableWidget(MapKlussButton.builder(Component.literal("Стройка"), button -> switchMode("building"))
+            .action("tracker.status_building")
+            .action("tracker.status_building")
             .selected(session != null && "building".equals(session.mode()))
             .dimensions(left + fourButtonWidth + gap, row2, fourButtonWidth, 20).build());
         stepButton = addRenderableWidget(MapKlussButton.builder(stepButtonText(), button -> cycleStep())
+            .action("tracker.step_cycle")
+            .action("tracker.step_cycle")
             .dimensions(left + (fourButtonWidth + gap) * 2, row2, fourButtonWidth, 20).build());
         undoButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Отмена"), button -> undoLastChange()).danger()
+            .action("tracker.undo")
+            .action("tracker.undo")
             .dimensions(left + (fourButtonWidth + gap) * 3, row2, fourButtonWidth, 20).build());
         setFocused(null);
         searchInput.setFocused(false);
@@ -190,12 +209,12 @@ public final class TrackerSessionScreen extends Screen {
 
     private void rebuildMaterialButtons() {
         if (session == null || session.materials() == null) return;
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
+        int panelWidth = trackerWork(trackerShell()).width();
         int left = screenLeft(panelWidth);
         int gap = 4;
         int actionsWidth = 44 + 28 + 38 + 38 + 24 + 36 + gap * 5;
         int actionX = left + panelWidth - actionsWidth;
-        int y = MATERIAL_Y;
+        int y = materialY();
         Map<String, Integer> progress = session.currentProgress();
         List<BuildSessionMaterial> visibleMaterials = filteredMaterials();
         int rows = visibleMaterialRows();
@@ -217,14 +236,19 @@ public final class TrackerSessionScreen extends Screen {
             progressInputs.add(new ProgressInput(material, input));
             addRenderableWidget(input);
             addRenderableWidget(MapKlussButton.builder(Component.literal("OK"), button -> applyManualProgress(material, input.getValue())).gold()
+                .action("tracker.set_count")
                 .dimensions(actionX + 44 + gap, rowY + 1, 28, 18).build());
             addRenderableWidget(MapKlussButton.builder(Component.literal("-" + currentStep()), button -> changeProgress(material, -currentStep())).danger()
+                .action("tracker.decrement")
                 .dimensions(actionX + 72 + gap * 2, rowY + 1, 38, 18).build());
             addRenderableWidget(MapKlussButton.builder(Component.literal("+" + currentStep()), button -> changeProgress(material, currentStep())).gold()
+                .action("tracker.add_one")
                 .dimensions(actionX + 110 + gap * 3, rowY + 1, 38, 18).build());
             addRenderableWidget(MapKlussButton.builder(Component.literal("0"), button -> setProgress(material, 0)).danger()
+                .action("tracker.clear_count")
                 .dimensions(actionX + 148 + gap * 4, rowY + 1, 24, 18).build());
             addRenderableWidget(MapKlussButton.builder(Component.literal("Все"), button -> setProgress(material, material.count())).gold()
+                .action("tracker.complete_all")
                 .dimensions(actionX + 172 + gap * 5, rowY + 1, 36, 18).build());
         }
     }
@@ -339,54 +363,45 @@ public final class TrackerSessionScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
-        MapKlussUi.drawBackdrop(context, width, height);
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
-        int left = screenLeft(panelWidth);
-        boolean sideRail = sideRailLayout(panelWidth, left);
-        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 46, MapKlussUi.panelBottom(height));
-        if (sideRail && !loadFailed) {
-            int railLeft = sideRailLeft(panelWidth, left);
-            MapKlussUi.drawPanelAt(context, railLeft - 8, railLeft + SIDE_RAIL_WIDTH + 8, 46, MapKlussUi.panelBottom(height));
-            drawSideRailSections(context, railLeft);
-        }
-        if (!loadFailed) {
-            MapKlussUi.drawSectionAt(context, font, null, left, panelWidth, 94, 34);
-            MapKlussUi.drawSectionAt(context, font, "Материалы", left, panelWidth, MATERIAL_Y - 32, Math.max(46, materialTableBottomY() - MATERIAL_Y + 34));
-            if (!sideRail) drawActionGroups(context);
-        }
-        MapKlussUi.drawHeader(context, font, title.getString(), "", width, 16);
-        MapKlussUi.drawStatusIn(context, font, status, left + panelWidth / 2, 36, panelWidth - 18);
+        CompanionUiLayout.Shell shell = MapKlussUi.drawShell(
+            context, font, width, height,
+            ScreenViewModel.shell(CompanionUiLayout.Destination.TRACKER, CompanionI18n.translate("Трекер"),
+                java.util.List.of(CompanionI18n.translate("Сессия")), status), false
+        );
+        CompanionUiLayout.Rect work = trackerWork(shell);
+        int panelWidth = work.width();
+        int left = work.x();
         if (loadFailed) {
-            MapKlussUi.drawEmptyState(context, font, "Сессия не найдена", "Проверьте UUID и повторите", left, 86, panelWidth, Math.max(44, height - 158));
+            MapKlussUi.drawEmptyState(context, font, "Сессия не найдена", "Проверьте UUID и повторите", left, work.y() + 30, panelWidth, Math.max(44, work.height() - 80));
             super.extractRenderState(context, mouseX, mouseY, delta);
+            MapKlussUi.drawNavigation(context, shell, CompanionUiLayout.Destination.TRACKER);
             return;
         }
-        MapKlussUi.drawFieldLabel(context, font, "Поиск материалов", left, 102, panelWidth);
         if (session != null) {
             String titleLine = session.info() != null && session.info().title() != null && !session.info().title().isBlank()
                 ? session.info().title()
                 : sessionId;
-            MapKlussUi.drawCenteredIn(context, font, titleLine, left + panelWidth / 2, 66, panelWidth - 12, MapKlussUi.CYAN);
+            MapKlussUi.drawLeft(context, font, titleLine, left, work.y() + 2, panelWidth, MapKlussUi.WHITE);
             int done = "building".equals(session.mode()) ? session.placedBlocks() : session.gatheredBlocks();
             MapKlussUi.drawCenteredIn(
                 context,
                 font,
                 "Режим: " + readableMode(session.mode()) + " / " + done + " / " + session.totalBlocks(),
-                left + panelWidth / 2,
-                80,
+                left,
+                work.y() + 20,
                 panelWidth - 12,
                 MapKlussUi.ACCENT
             );
-            MapKlussUi.drawCenteredIn(
+            MapKlussUi.drawLeft(
                 context,
                 font,
                 pageSummary(),
-                left + panelWidth / 2,
-                142,
+                left,
+                materialY() - 18,
                 panelWidth - 12,
-                MapKlussUi.WHITE
+                MapKlussUi.MUTED
             );
-                int y = MATERIAL_RENDER_Y;
+                int y = materialRenderY();
                 if (session.materials() != null) {
                     int gap = 4;
                     int actionsWidth = 44 + 28 + 38 + 38 + 24 + 36 + gap * 5;
@@ -411,10 +426,11 @@ public final class TrackerSessionScreen extends Screen {
             }
         }
         super.extractRenderState(context, mouseX, mouseY, delta);
+        MapKlussUi.drawNavigation(context, shell, CompanionUiLayout.Destination.TRACKER);
     }
 
     private void drawActionGroups(GuiGraphicsExtractor context) {
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
+        int panelWidth = trackerWork(trackerShell()).width();
         int left = screenLeft(panelWidth);
         int row1 = actionTop();
         int row2 = row1 + ACTION_ROW_HEIGHT;
@@ -432,7 +448,7 @@ public final class TrackerSessionScreen extends Screen {
         int countX,
         int actionsWidth
     ) {
-        int y = MATERIAL_Y - 14;
+        int y = materialY() - 14;
         context.fill(left + 2, y - 3, left + panelWidth - 2, y - 2, 0x6650505D);
         MapKlussUi.drawLeft(context, font, "Материал", nameX, y, nameWidth, MapKlussUi.CYAN);
         MapKlussUi.drawLeft(context, font, "Всего", countX, y, 42, MapKlussUi.CYAN);
@@ -566,33 +582,25 @@ public final class TrackerSessionScreen extends Screen {
     }
 
     private int visibleMaterialRows() {
-        return Math.max(0, Math.min(MATERIAL_ROWS, (materialTableBottomY() - MATERIAL_Y - 8) / MATERIAL_ROW_HEIGHT));
+        return Math.max(0, Math.min(MATERIAL_ROWS, (materialTableBottomY() - materialY() - 8) / MATERIAL_ROW_HEIGHT));
     }
 
     private int actionTop() {
-        return CompanionLayout.actionTop(
-            height,
-            MIN_ACTION_TOP,
-            ACTION_ROWS,
-            ACTION_ROW_HEIGHT,
-            ACTION_BUTTON_HEIGHT,
-            ACTION_BOTTOM_MARGIN
-        );
+        CompanionUiLayout.Rect work = trackerWork(trackerShell());
+        return Math.max(materialY() + 34, work.bottom() - 54);
     }
 
     private boolean isOverMaterialTable(double mouseX, double mouseY) {
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
+        int panelWidth = trackerWork(trackerShell()).width();
         int left = screenLeft(panelWidth);
         return mouseX >= left - 6
             && mouseX <= left + panelWidth + 6
-            && mouseY >= MATERIAL_Y - 4
+            && mouseY >= materialY() - 4
             && mouseY <= materialTableBottomY();
     }
 
     private int materialTableBottomY() {
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
-        int left = screenLeft(panelWidth);
-        return sideRailLayout(panelWidth, left) ? height - 24 : actionTop() - 18;
+        return actionTop() - 18;
     }
 
     private boolean sideRailLayout(int panelWidth, int left) {
@@ -604,7 +612,57 @@ public final class TrackerSessionScreen extends Screen {
     }
 
     private int screenLeft(int panelWidth) {
-        return MapKlussUi.centeredLeft(width, panelWidth);
+        return trackerWork(trackerShell()).x();
+    }
+
+    private int materialY() {
+        return trackerWork(trackerShell()).y() + 94;
+    }
+
+    private int materialRenderY() {
+        return materialY() + 4;
+    }
+
+    private CompanionUiLayout.Shell trackerShell() {
+        return CompanionUiLayout.shell(width, height, false);
+    }
+
+    private CompanionUiLayout.Rect trackerWork(CompanionUiLayout.Shell shell) {
+        CompanionUiLayout.Rect content = shell.content();
+        return new CompanionUiLayout.Rect(content.x() + 14, content.y() + 12, Math.max(1, content.width() - 28), Math.max(1, content.height() - 24));
+    }
+
+    private void addNavigationControls(CompanionUiLayout.Shell shell) {
+        for (int i = 0; i <= CompanionUiLayout.Destination.ACCOUNT.ordinal(); i++) {
+            CompanionUiLayout.Destination destination = CompanionUiLayout.Destination.values()[i];
+            CompanionUiLayout.Rect rect = CompanionUiLayout.navigationButton(shell, i);
+            addRenderableWidget(MapKlussButton.builder(Component.literal(""), button -> openDestination(destination))
+                .action(CompanionActionInventory.navigationAction(destination))
+                .tooltip(CompanionI18n.text(destinationLabel(destination)))
+                .dimensions(rect.x(), rect.y(), rect.width(), rect.height()).build());
+        }
+    }
+
+    private void openDestination(CompanionUiLayout.Destination destination) {
+        switch (destination) {
+            case LIBRARY -> client().gui.setScreen(new CompanionLibraryScreen(this));
+            case LENS -> client().gui.setScreen(new LensScreen(this));
+            case SCAN -> client().gui.setScreen(new ScanScreen(this));
+            case TRACKER -> { }
+            case ACCOUNT -> client().gui.setScreen(new CompanionAccountScreen(this));
+            default -> { }
+        }
+    }
+
+    private String destinationLabel(CompanionUiLayout.Destination destination) {
+        return switch (destination) {
+            case LIBRARY -> "Библиотека";
+            case LENS -> "Lens";
+            case SCAN -> "Скан";
+            case TRACKER -> "Трекер";
+            case ACCOUNT -> "Аккаунт";
+            default -> destination.name();
+        };
     }
 
     private boolean scrollMaterials(double verticalAmount) {

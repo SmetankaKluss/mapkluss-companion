@@ -7,7 +7,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.DynamicTexture;
@@ -70,7 +69,7 @@ final class LensTextureAtlas implements AutoCloseable {
     }
 
     private void download(PendingRequest request) {
-        CompletableFuture.supplyAsync(() -> downloadImage(request))
+        LensPreviewExecutor.supply(() -> downloadImage(request))
             .thenAccept(image -> Minecraft.getInstance().execute(() -> {
                 try {
                     install(image, request);

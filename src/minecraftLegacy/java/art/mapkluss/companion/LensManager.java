@@ -304,6 +304,7 @@ public final class LensManager {
                     placements.put(placement.placementId(), placement);
                     rememberOwnedPlacement(placement.placementId(), placement.sessionId(), worldKey);
                     acceptSession(session);
+                    CompanionTelemetryManager.record(CompanionTelemetryEvent.LENS_STARTED);
                     status = CompanionI18n.translate("Lens закреплён") + ": " + placement.title();
                     nextPollAt = 0;
                 });

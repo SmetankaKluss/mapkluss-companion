@@ -30,36 +30,71 @@ public final class SuppressionStartScreen extends Screen {
     protected void init() {
         requests.attach();
         clearChildren();
-        SuppressionStartLayout.Layout layout = SuppressionStartLayout.calculate(width, height);
-        int panelWidth = layout.panelWidth();
-        int left = layout.left();
-        int buttonWidth = layout.splitSources() ? (panelWidth - 8) / 2 : panelWidth;
-        int stopWidth = Math.min(112, Math.max(80, panelWidth / 3));
-        int sessionWidth = panelWidth - stopWidth - 8;
+        CompanionUiLayout.Shell shell = workflowShell();
+        addNavigationControls(shell);
+        CompanionUiLayout.Rect panel = taskPanel(shell);
+        int gap = 6;
+        int innerLeft = panel.x() + 12;
+        int innerWidth = Math.max(1, panel.width() - 24);
+        int sourceY = panel.y() + 54;
+        int buttonWidth = Math.max(54, (innerWidth - gap) / 2);
         addDrawableChild(MapKlussButton.builder(Text.literal("Из облака"), button -> startCloud())
+            .action("two_layer.start_cloud")
             .special().tooltip(CompanionI18n.text(manifest != null && manifest.hasSuppressionBundle() ? "Облачный план" : "Требуется арт с Two-layer файлами"))
-            .dimensions(left, layout.cloudY(), buttonWidth, 20).enabledWhen(() -> !busy && !SuppressionManager.instance().active()
+            .dimensions(innerLeft, sourceY, buttonWidth, 22).enabledWhen(() -> !busy && !SuppressionManager.instance().active()
                 && manifest != null && manifest.hasSuppressionBundle()).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Импорт ZIP"), button -> chooseLocalZip())
+            .action("two_layer.import_zip")
             .special()
-            .dimensions(layout.splitSources() ? left + buttonWidth + 8 : left, layout.localY(), buttonWidth, 20)
+            .dimensions(innerLeft + buttonWidth + gap, sourceY, innerWidth - buttonWidth - gap, 22)
             .enabledWhen(() -> !busy && !SuppressionManager.instance().active()).build());
+
+        int footerY = panel.bottom() - 34;
+        int backWidth = Math.min(88, Math.max(64, innerWidth / 5));
+        addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Назад"), button -> client().setScreen(parent))
+            .action("global.back")
+            .dimensions(innerLeft, footerY, backWidth, 22).enabledWhen(() -> !busy).build());
+
+        int stopWidth = Math.min(104, Math.max(76, innerWidth / 4));
+        int sessionX = innerLeft + backWidth + gap;
+        int sessionWidth = Math.max(56, innerWidth - backWidth - stopWidth - gap * 2);
         addDrawableChild(MapKlussButton.builder(Text.literal(sessionActionLabel()), button -> {
                 resetStopConfirmation();
                 SuppressionManager.instance().handleWorldAction(client());
                 client().setScreen(null);
             })
-            .special().dimensions(left, layout.sessionY(), sessionWidth, 20)
+            .action("two_layer.resume")
+            .special().dimensions(sessionX, footerY, sessionWidth, 22)
             .visibleWhen(() -> SuppressionManager.instance().active())
             .enabledWhen(() -> !busy).build());
         stopButton = addDrawableChild(MapKlussButton.builder(Text.literal("Остановить"), button -> stopBuilding())
-            .danger().navigationOrder(1000).dimensions(left + sessionWidth + 8, layout.sessionY(), stopWidth, 20)
+            .action("two_layer.stop")
+            .danger().navigationOrder(1000).dimensions(sessionX + sessionWidth + gap, footerY, stopWidth, 22)
             .visibleWhen(() -> SuppressionManager.instance().active())
             .enabledWhen(() -> !busy).build());
-        addDrawableChild(MapKlussUi.languageButton(this));
-        addDrawableChild(MapKlussUi.backButton(
-            this, parent, left, layout.bottom(), () -> !busy
-        ));
+        addDrawableChild(MapKlussUi.languageButtonAt(this, shell.topBar().right() - 38, shell.topBar().y() + 9));
+    }
+
+    private void addNavigationControls(CompanionUiLayout.Shell shell) {
+        for (int i = 0; i <= CompanionUiLayout.Destination.ACCOUNT.ordinal(); i++) {
+            CompanionUiLayout.Destination destination = CompanionUiLayout.Destination.values()[i];
+            CompanionUiLayout.Rect rect = CompanionUiLayout.navigationButton(shell, i);
+            addDrawableChild(MapKlussButton.builder(Text.literal(""), button -> openDestination(destination))
+                .action(CompanionActionInventory.navigationAction(destination))
+                .tooltip(CompanionI18n.text(destination.name()))
+                .dimensions(rect.x(), rect.y(), rect.width(), rect.height()).enabledWhen(() -> !busy).build());
+        }
+    }
+
+    private void openDestination(CompanionUiLayout.Destination destination) {
+        switch (destination) {
+            case LIBRARY -> client().setScreen(new CompanionLibraryScreen(parent));
+            case LENS -> client().setScreen(new LensScreen(this));
+            case SCAN -> client().setScreen(new ScanScreen(this));
+            case TRACKER -> client().setScreen(new TrackerOpenScreen(this));
+            case ACCOUNT -> client().setScreen(new CompanionAccountScreen(this));
+            default -> { }
+        }
     }
 
     private void startCloud() {
@@ -193,30 +228,47 @@ public final class SuppressionStartScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        MapKlussUi.drawBackdrop(context, width, height);
-        SuppressionStartLayout.Layout layout = SuppressionStartLayout.calculate(width, height);
-        int panelWidth = layout.panelWidth();
-        int left = layout.left();
-        MapKlussUi.drawPanelAt(
-            context, left - 10, left + panelWidth + 10, layout.top(), layout.bottom()
+        ScreenViewModel model = screenModel();
+        CompanionUiLayout.Shell shell = MapKlussUi.drawShell(
+            context, textRenderer, width, height, model, false
         );
-        MapKlussUi.drawLocalHeader(
-            context, textRenderer, "TWO-LAYER", "",
-            left - 4, left + panelWidth + 4, layout.top() + (layout.compact() ? 10 : 16)
-        );
-        int sourceTop = layout.cloudY() - 18;
-        int sourceBottom = (layout.splitSources() ? layout.cloudY() : layout.localY()) + 26;
-        MapKlussUi.drawSectionAt(context, textRenderer, "Источник плана", left, panelWidth, sourceTop,
-            sourceBottom - sourceTop);
-        MapKlussUi.drawDataStrip(
-            context, left, left + panelWidth, layout.statusY() - 5,
-            Math.min(layout.backY() - 4, layout.statusY() + 18)
-        );
+        CompanionUiLayout.Rect panel = taskPanel(shell);
+        MapKlussUi.drawPanelAt(context, panel.x(), panel.right(), panel.y(), panel.bottom());
+        MapKlussUi.drawLeft(context, textRenderer, "План строительства", panel.x() + 12, panel.y() + 12,
+            panel.width() - 24, MapKlussUi.WHITE);
+        MapKlussUi.drawSectionAt(context, textRenderer, "Источник", panel.x() + 12, panel.width() - 24,
+            panel.y() + 38, 48);
+        int statusTop = panel.y() + 88;
+        int statusBottom = panel.bottom() - 42;
+        MapKlussUi.drawDataStrip(context, panel.x() + 12, panel.right() - 12, statusTop, statusBottom);
         String visibleStatus = status.isBlank() ? "Выберите источник" : status;
-        MapKlussUi.drawWrappedCenteredIn(context, textRenderer, visibleStatus, width / 2, layout.statusY(),
-            panelWidth - 24, layout.guidanceLines(),
-            busy ? MapKlussUi.GOLD : MapKlussUi.statusColor(status));
+        if (SuppressionManager.instance().active()) {
+            visibleStatus = "Текущий этап: " + sessionActionLabel();
+        }
+        MapKlussUi.drawWrappedCenteredIn(context, textRenderer, visibleStatus, panel.x() + panel.width() / 2,
+            statusTop + Math.max(7, (statusBottom - statusTop) / 2 - 4), panel.width() - 48, 2,
+            MapKlussUi.statusColor(model.statusKind()));
         super.render(context, mouseX, mouseY, delta);
+    }
+
+    private ScreenViewModel screenModel() {
+        boolean active = SuppressionManager.instance().active();
+        String visibleStatus = active ? sessionActionLabel() : status;
+        ScreenViewModel.StatusKind kind = busy
+            ? ScreenViewModel.StatusKind.LOADING
+            : active ? ScreenViewModel.StatusKind.SUCCESS : ScreenViewModel.classifyStatus(status);
+        return ScreenViewModel.shell(
+            CompanionUiLayout.Destination.TWO_LAYER, "Two-layer",
+            java.util.List.of(CompanionI18n.translate("План строительства")), visibleStatus, kind
+        );
+    }
+
+    private CompanionUiLayout.Shell workflowShell() {
+        return CompanionUiLayout.shell(width, height, false);
+    }
+
+    private CompanionUiLayout.Rect taskPanel(CompanionUiLayout.Shell shell) {
+        return CompanionUiLayout.focusedPanel(shell.content(), 520, 210);
     }
 
     @Override

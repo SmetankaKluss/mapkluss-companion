@@ -1,4 +1,4 @@
 package art.mapkluss.companion;
 
-public record BuildSessionResponse(BuildSessionState session) {
+public record BuildSessionResponse(BuildSessionState session, boolean created) {
 }

@@ -82,10 +82,11 @@ final class CompanionLayoutTest {
     }
 
     @Test
-    void artPreviewUsesTheRightHalfAtNormalLargeGuiWidths() {
+    void artPreviewUsesTheWideShellBreakpoint() {
         assertTrue(!CompanionArtScreen.usesSidePreview(619));
-        assertTrue(CompanionArtScreen.usesSidePreview(620));
-        assertTrue(CompanionArtScreen.usesSidePreview(735));
+        assertTrue(!CompanionArtScreen.usesSidePreview(759));
+        assertTrue(CompanionArtScreen.usesSidePreview(760));
+        assertTrue(CompanionArtScreen.usesSidePreview(960));
     }
 
     private static void assertActionRowsFit(int height, int minTop, int rows, int rowHeight, int buttonHeight, int bottomMargin) {

@@ -1,0 +1,12 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Supabase anon key is an intentionally public client credential"
+regexTarget = "line"
+paths = ['''src/main/java/art/mapkluss/companion/CompanionConfig\.java''']
+regexes = ['''DEFAULT_SUPABASE_ANON_KEY''']
+
+[[allowlists]]
+description = "Local Minecraft runtime state is ignored and never published"
+paths = ['''(^|[\\/])run[\\/]''']

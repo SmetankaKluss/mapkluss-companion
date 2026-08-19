@@ -13,15 +13,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CompletableFuture;
 
 public final class DeviceLoginScreen extends Screen {
-    private static final int PANEL_WIDTH = 1120;
-    private static final int SECTION_WIDTH = 1120;
-    private static final int ACTION_ROWS = 2;
-    private static final int ACTION_ROW_HEIGHT = 34;
-    private static final int ACTION_BUTTON_HEIGHT = 20;
-    private static final int ACTION_BOTTOM_MARGIN = 32;
-    private static final int ACTION_TOP = 154;
-    private static final int SIDE_RAIL_WIDTH = 142;
-    private static final int SIDE_RAIL_GAP = 22;
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
         .withZone(ZoneId.systemDefault());
 
@@ -47,55 +38,39 @@ public final class DeviceLoginScreen extends Screen {
         closed = false;
         refreshSessionInfo();
         clearChildren();
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
-        int left = screenLeft(panelWidth);
-        int gap = 4;
-        if (sideRailLayout(panelWidth, left)) {
-            addSideRailControls(sideRailLeft(panelWidth, left));
-        } else {
-            int buttonWidth = Math.max(54, (panelWidth - gap * 2) / 3);
-            int halfWidth = Math.max(80, (panelWidth - gap) / 2);
-            int row1 = actionTop();
-            int row2 = row1 + ACTION_ROW_HEIGHT;
-            addDrawableChild(MapKlussButton.builder(Text.literal("Получить код"), button -> startLogin()).gold()
-                .dimensions(left, row1, buttonWidth, 20).build());
-            autoPollButton = addDrawableChild(MapKlussButton.builder(autoPollButtonText(), button -> toggleAutoPoll())
-                .technical()
-                .selected(autoPollEnabled)
-                .dimensions(left + buttonWidth + gap, row1, buttonWidth, 20).build());
-            pollButton = addDrawableChild(MapKlussButton.builder(Text.literal("Проверить"), button -> pollLogin())
-                .technical().dimensions(left + (buttonWidth + gap) * 2, row1, buttonWidth, 20).build());
-            copyButton = addDrawableChild(MapKlussButton.builder(Text.literal("Копировать"), button -> copyUserCode())
-                .technical().dimensions(left, row2, halfWidth, 20).build());
-            addDrawableChild(MapKlussButton.builder(Text.literal("Открыть сайт"), button -> openDevicePage())
-                .technical().dimensions(left + halfWidth + gap, row2, panelWidth - halfWidth - gap, 20).build());
-        }
-        addDrawableChild(MapKlussUi.languageButton(this));
-        addDrawableChild(MapKlussUi.backButton(this, parent, left));
+        CompanionUiLayout.Shell shell = loginShell();
+        CompanionUiLayout.Rect panel = loginPanel(shell);
+        addLoginControls(shell, panel);
+        addNavigationControls(shell);
+        addDrawableChild(MapKlussUi.languageButtonAt(this, shell.topBar().right() - 38, shell.topBar().y() + 9));
         updateButtons();
     }
 
-    private void addSideRailControls(int railLeft) {
-        addDrawableChild(MapKlussButton.builder(Text.literal("Получить код"), button -> startLogin()).gold()
-            .dimensions(railLeft, 78, SIDE_RAIL_WIDTH, 20).build());
+    private void addLoginControls(CompanionUiLayout.Shell shell, CompanionUiLayout.Rect panel) {
+        int gap = 6;
+        int x = panel.x() + 14;
+        int innerWidth = Math.max(1, panel.width() - 28);
+        int row1 = panel.bottom() - 54;
+        int row2 = panel.bottom() - 28;
+        int third = Math.max(48, (innerWidth - gap * 2) / 3);
+        int half = Math.max(68, (innerWidth - gap) / 2);
+        addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Получить код"), button -> startLogin()).selected(true)
+            .action("account.login_start")
+            .dimensions(x, row1, third, 22).build());
         autoPollButton = addDrawableChild(MapKlussButton.builder(autoPollButtonText(), button -> toggleAutoPoll())
+            .action("account.login_auto_poll")
             .technical()
             .selected(autoPollEnabled)
-            .dimensions(railLeft, 104, SIDE_RAIL_WIDTH, 20).build());
-
-        pollButton = addDrawableChild(MapKlussButton.builder(Text.literal("Проверить"), button -> pollLogin())
-            .technical().dimensions(railLeft, 162, SIDE_RAIL_WIDTH, 20).build());
-        copyButton = addDrawableChild(MapKlussButton.builder(Text.literal("Копировать код"), button -> copyUserCode())
-            .technical().dimensions(railLeft, 188, SIDE_RAIL_WIDTH, 20).build());
-        addDrawableChild(MapKlussButton.builder(Text.literal("Открыть сайт"), button -> openDevicePage())
-            .technical().dimensions(railLeft, 214, SIDE_RAIL_WIDTH, 20).build());
-
-    }
-
-    private int actionTop() {
-        int rowSpan = Math.max(0, ACTION_ROWS - 1) * ACTION_ROW_HEIGHT + ACTION_BUTTON_HEIGHT;
-        int maxTop = height - ACTION_BOTTOM_MARGIN - rowSpan;
-        return Math.max(108, Math.min(ACTION_TOP, maxTop));
+            .dimensions(x + third + gap, row1, third, 22).build());
+        pollButton = addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Проверить"), button -> pollLogin())
+            .action("account.login_poll")
+            .technical().dimensions(x + (third + gap) * 2, row1, innerWidth - (third + gap) * 2, 22).build());
+        copyButton = addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Копировать код"), button -> copyUserCode())
+            .action("account.copy_code")
+            .technical().dimensions(x, row2, half, 22).build());
+        addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Открыть сайт"), button -> openDevicePage())
+            .action("account.open_site")
+            .dimensions(x + half + gap, row2, innerWidth - half - gap, 22).build());
     }
 
     private void startLogin() {
@@ -198,6 +173,7 @@ public final class DeviceLoginScreen extends Screen {
             runOnClient(generation, () -> {
                 try {
                     runtime.saveSession(response.accessToken(), response.userId());
+                    CompanionTelemetryManager.record(CompanionTelemetryEvent.LOGIN_COMPLETED);
                     pollLoopGeneration++;
                     login = null;
                     sessionInfo = runtime.sessionInfo();
@@ -250,41 +226,36 @@ public final class DeviceLoginScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        MapKlussUi.drawBackdrop(context, width, height);
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
-        int left = screenLeft(panelWidth);
-        boolean sideRail = sideRailLayout(panelWidth, left);
-        int controlsTop = actionTop();
-        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 46, MapKlussUi.panelBottom(height));
-        if (sideRail) {
-            int railLeft = sideRailLeft(panelWidth, left);
-            MapKlussUi.drawPanelAt(context, railLeft - 8, railLeft + SIDE_RAIL_WIDTH + 8, 46, MapKlussUi.panelBottom(height));
-            drawSideRailSections(context, railLeft);
+        CompanionUiLayout.Shell shell = MapKlussUi.drawShell(
+            context, textRenderer, width, height,
+            ScreenViewModel.shell(CompanionUiLayout.Destination.ACCOUNT, CompanionI18n.translate("Аккаунт"),
+                java.util.List.of(CompanionI18n.translate("Вход")), status), false
+        );
+        CompanionUiLayout.Rect panel = loginPanel(shell);
+        context.fill(panel.x(), panel.y(), panel.right(), panel.bottom(), UiTheme.SURFACE_RAISED);
+        context.fill(panel.x(), panel.y(), panel.x() + 3, panel.bottom(), login == null ? UiTheme.AMBER : UiTheme.LIME);
+        int x = panel.x() + 14;
+        int textWidth = Math.max(1, panel.width() - 28);
+        MapKlussUi.drawLeft(context, textRenderer, login == null ? "Вход в MapKluss" : "Подтвердите вход на сайте", x, panel.y() + 13, textWidth, MapKlussUi.WHITE);
+        if (panel.height() >= 180) {
+            MapKlussUi.drawLeft(context, textRenderer, sessionSummary(), x, panel.y() + 31, textWidth, sessionColor());
         }
-        int cardHeight = login == null ? 74 : (controlsTop > 138 ? 68 : Math.max(32, controlsTop - 78));
-        MapKlussUi.drawSectionAt(context, textRenderer, login == null ? "Вход" : "Код входа", left, panelWidth, 76, cardHeight);
-        if (!sideRail) drawActionGroups(context);
-        MapKlussUi.drawHeader(context, textRenderer, title.getString(), "", width, 20);
-        MapKlussUi.drawStatusIn(context, textRenderer, status, left + panelWidth / 2, 38, panelWidth - 16);
-        MapKlussUi.drawCenteredIn(context, textRenderer, sessionSummary(), left + panelWidth / 2, 68, panelWidth - 12, sessionColor());
         if (login != null) {
-            int codeY = 90;
-            if (controlsTop > 112) {
-                MapKlussUi.drawCenteredIn(context, textRenderer, login.userCode(), left + panelWidth / 2, codeY, panelWidth - 12, MapKlussUi.ACCENT);
-            }
-            if (controlsTop > 126) {
-                MapKlussUi.drawCenteredIn(context, textRenderer, login.verificationUri(), left + panelWidth / 2, codeY + 14, panelWidth - 12, MapKlussUi.CYAN);
-            }
-            if (controlsTop > 140) {
+            int codeY = panel.height() >= 180 ? panel.y() + 62 : panel.y() + 31;
+            context.fill(x, codeY - 8, panel.right() - 14, codeY + 28, UiTheme.SURFACE_INPUT);
+            MapKlussUi.drawCenteredIn(context, textRenderer, login.userCode(), panel.x() + panel.width() / 2, codeY, textWidth, MapKlussUi.ACCENT);
+            if (panel.height() >= 180) {
                 String timing = CompanionI18n.english(client())
                     ? "Expires in " + remainingSeconds() + "s / checks every " + login.interval() + "s / " + (autoPollEnabled ? "automatically" : "manually")
                     : "Истекает через " + remainingSeconds() + "с / проверка каждые " + login.interval() + "с / " + (autoPollEnabled ? "автоматически" : "вручную");
-                MapKlussUi.drawCenteredIn(context, textRenderer, timing, left + panelWidth / 2, codeY + 28, panelWidth - 12, MapKlussUi.MUTED);
+                MapKlussUi.drawCenteredIn(context, textRenderer, timing, panel.x() + panel.width() / 2, codeY + 16, textWidth, MapKlussUi.MUTED);
             }
         } else {
-            MapKlussUi.drawCenteredIn(context, textRenderer, "Нажмите «Получить код»", left + panelWidth / 2, 96, panelWidth - 12, MapKlussUi.ACCENT);
+            int emptyY = panel.height() >= 180 ? panel.y() + 70 : panel.y() + 38;
+            MapKlussUi.drawCenteredIn(context, textRenderer, "Получите код и подтвердите его на mapkluss.art", panel.x() + panel.width() / 2, emptyY, textWidth, MapKlussUi.MUTED);
         }
         super.render(context, mouseX, mouseY, delta);
+        MapKlussUi.drawNavigation(context, shell, CompanionUiLayout.Destination.ACCOUNT);
     }
 
     private void updateButtons() {
@@ -298,34 +269,49 @@ public final class DeviceLoginScreen extends Screen {
         }
     }
 
-    private void drawActionGroups(DrawContext context) {
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
-        int left = screenLeft(panelWidth);
-        int row1 = actionTop();
-        int row2 = row1 + ACTION_ROW_HEIGHT;
-        MapKlussUi.drawActionGroupLabel(context, textRenderer, "Проверка", left, panelWidth, row1, ACTION_BUTTON_HEIGHT);
-        MapKlussUi.drawActionGroupLabel(context, textRenderer, "Код", left, panelWidth, row2, ACTION_BUTTON_HEIGHT);
-    }
-
-    private void drawSideRailSections(DrawContext context, int railLeft) {
-        MapKlussUi.drawSectionAt(context, textRenderer, "Проверка", railLeft, SIDE_RAIL_WIDTH, 58, 76);
-        MapKlussUi.drawSectionAt(context, textRenderer, "Код", railLeft, SIDE_RAIL_WIDTH, 142, 102);
-    }
-
-    private boolean sideRailLayout(int panelWidth, int left) {
-        return false;
-    }
-
-    private int sideRailLeft(int panelWidth, int left) {
-        return left + panelWidth + SIDE_RAIL_GAP;
-    }
-
-    private int screenLeft(int panelWidth) {
-        return MapKlussUi.centeredLeft(width, panelWidth);
-    }
-
     private Text autoPollButtonText() {
-        return Text.literal(autoPollEnabled ? "Авто: вкл" : "Авто: выкл");
+        return CompanionI18n.text(autoPollEnabled ? "Авто: вкл" : "Авто: выкл");
+    }
+
+    private CompanionUiLayout.Shell loginShell() {
+        return CompanionUiLayout.shell(width, height, false);
+    }
+
+    private CompanionUiLayout.Rect loginPanel(CompanionUiLayout.Shell shell) {
+        return CompanionUiLayout.focusedPanel(shell.content(), 560, 270);
+    }
+
+    private void addNavigationControls(CompanionUiLayout.Shell shell) {
+        for (int i = 0; i <= CompanionUiLayout.Destination.ACCOUNT.ordinal(); i++) {
+            CompanionUiLayout.Destination destination = CompanionUiLayout.Destination.values()[i];
+            CompanionUiLayout.Rect rect = CompanionUiLayout.navigationButton(shell, i);
+            addDrawableChild(MapKlussButton.builder(Text.literal(""), button -> openDestination(destination))
+                .action(CompanionActionInventory.navigationAction(destination))
+                .tooltip(CompanionI18n.text(destinationLabel(destination)))
+                .dimensions(rect.x(), rect.y(), rect.width(), rect.height()).build());
+        }
+    }
+
+    private void openDestination(CompanionUiLayout.Destination destination) {
+        switch (destination) {
+            case LIBRARY -> client().setScreen(new CompanionLibraryScreen(this));
+            case LENS -> client().setScreen(new LensScreen(this));
+            case SCAN -> client().setScreen(new ScanScreen(this));
+            case TRACKER -> client().setScreen(new TrackerOpenScreen(this));
+            case ACCOUNT -> client().setScreen(parent);
+            default -> { }
+        }
+    }
+
+    private String destinationLabel(CompanionUiLayout.Destination destination) {
+        return switch (destination) {
+            case LIBRARY -> "Библиотека";
+            case LENS -> "Lens";
+            case SCAN -> "Скан";
+            case TRACKER -> "Трекер";
+            case ACCOUNT -> "Аккаунт";
+            default -> destination.name();
+        };
     }
 
     private String loginStatus(String value) {

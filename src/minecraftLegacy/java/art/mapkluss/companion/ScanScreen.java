@@ -17,15 +17,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class ScanScreen extends Screen {
-    private static final int PANEL_WIDTH = 1120;
-    private static final int SECTION_WIDTH = 1120;
     private static final int SIDE_RAIL_WIDTH = 138;
     private static final int SIDE_RAIL_GAP = 22;
-    private static final int ACTION_ROWS = 4;
-    private static final int ACTION_ROW_HEIGHT = 34;
-    private static final int ACTION_BUTTON_HEIGHT = 20;
-    private static final int ACTION_BOTTOM_MARGIN = 32;
-    private static final int MIN_ACTION_TOP = 88;
 
     private final Screen parent;
     private TextFieldWidget titleInput;
@@ -60,24 +53,30 @@ public final class ScanScreen extends Screen {
         requests.attach();
         clearChildren();
         loadHistory();
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
-        int left = screenLeft(panelWidth);
-        int gap = 4;
-        int smallButtonWidth = Math.max(52, Math.min(72, (panelWidth - gap * 2) / 6));
-        int titleWidth = Math.max(96, panelWidth - smallButtonWidth * 2 - gap * 2);
-        titleInput = new TextFieldWidget(textRenderer, left, 76, titleWidth, 20, CompanionI18n.text("Название скана"));
+        CompanionUiLayout.Shell shell = scanShell();
+        CompanionUiLayout.Rect work = scanWork(shell);
+        int panelWidth = work.width();
+        int left = work.x();
+        int gap = 6;
+        int applyButtonWidth = Math.max(72, textRenderer.getWidth(CompanionI18n.text("Применить")) + 18);
+        int resetButtonWidth = Math.max(52, textRenderer.getWidth(CompanionI18n.text("Сброс")) + 18);
+        int titleWidth = Math.max(96, panelWidth - applyButtonWidth - resetButtonWidth - gap * 2);
+        titleInput = new TextFieldWidget(textRenderer, left, work.y(), titleWidth, 22, CompanionI18n.text("Название скана"));
         titleInput.setMaxLength(120);
         titleInput.setText(draft == null ? "" : draft.title());
         addDrawableChild(titleInput);
         addDrawableChild(MapKlussButton.builder(Text.literal("Применить"), button -> applyDraftTitle()).gold()
+            .action("scan.title_apply")
             .tooltip(CompanionI18n.text("Применить название скана"))
-            .dimensions(left + titleWidth + gap, 76, smallButtonWidth, 20).build());
+            .dimensions(left + titleWidth + gap, work.y(), applyButtonWidth, 22).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Сброс"), button -> resetDraftTitle())
-            .dimensions(left + titleWidth + smallButtonWidth + gap * 2, 76, smallButtonWidth, 20).build());
+            .action("scan.title_reset")
+            .dimensions(left + titleWidth + applyButtonWidth + gap * 2, work.y(), resetButtonWidth, 22).build());
 
+        addScanModeControls(work);
         addPagedActionControls(left, panelWidth, gap);
-        addDrawableChild(MapKlussUi.languageButton(this));
-        addDrawableChild(MapKlussUi.backButton(this, parent, left));
+        addNavigationControls(shell);
+        addDrawableChild(MapKlussUi.languageButtonAt(this, shell.topBar().right() - 38, shell.topBar().y() + 9));
         setFocused(null);
         titleInput.setFocused(false);
         updateButtonStates();
@@ -90,9 +89,10 @@ public final class ScanScreen extends Screen {
     }
 
     private void addPagedActionControls(int left, int panelWidth, int gap) {
-        if (height < 178) return;
-        String[] groups = {"Скан", "Результат", "История", "Открыть"};
-        int tabWidth = Math.max(46, (panelWidth - gap * 3) / 4);
+        CompanionUiLayout.Rect work = scanWork(scanShell());
+        if (work.height() < 120) return;
+        String[] groups = {"Результат", "История", "Открыть"};
+        int tabWidth = Math.max(46, (panelWidth - gap * 2) / 3);
         int tabsY = actionTabsY();
         for (int i = 0; i < groups.length; i++) {
             final int page = i;
@@ -100,46 +100,58 @@ public final class ScanScreen extends Screen {
                     actionPage = page;
                     deleteConfirmation.reset();
                     init();
-                }).selected(actionPage == i).dimensions(left + (tabWidth + gap) * i, tabsY,
+                }).action(CompanionActionInventory.scanTabAction(i)).selected(actionPage == i).dimensions(left + (tabWidth + gap) * i, tabsY,
                     i == groups.length - 1 ? panelWidth - (tabWidth + gap) * i : tabWidth, 20).build());
         }
         int rowY = actionTop();
         if (actionPage == 0) {
-            int w = Math.max(48, (panelWidth - gap * 3) / 4);
-            addDrawableChild(MapKlussButton.builder(Text.literal("Из руки"), button -> scanHand()).tooltip(CompanionI18n.text("Сканировать карту в руке")).dimensions(left, rowY, w, 20).build());
-            addDrawableChild(MapKlussButton.builder(Text.literal("Одна рамка"), button -> scanFrame()).tooltip(CompanionI18n.text("Сканировать рамку под прицелом")).dimensions(left + w + gap, rowY, w, 20).build());
-            addDrawableChild(MapKlussButton.builder(Text.literal("Вся стена"), button -> scanWall()).tooltip(CompanionI18n.text("Найти всю стену карт автоматически")).dimensions(left + (w + gap) * 2, rowY, w, 20).build());
-            addDrawableChild(MapKlussButton.builder(Text.literal("По углам"), button -> scanManualWall()).tooltip(CompanionI18n.text("Сканировать область между углами A и B")).dimensions(left + (w + gap) * 3, rowY, panelWidth - (w + gap) * 3, 20).build());
+            int w = Math.max(36, (panelWidth - gap * 4) / 5);
+            addDrawableChild(MapKlussButton.builder(Text.literal("Угол A"), button -> setCornerA()).action("scan.corner_a").tooltip(CompanionI18n.text("Запомнить первый угол стены")).dimensions(left, rowY, w, 20).build());
+            addDrawableChild(MapKlussButton.builder(Text.literal("Угол B"), button -> setCornerB()).action("scan.corner_b").tooltip(CompanionI18n.text("Запомнить второй угол стены")).dimensions(left + w + gap, rowY, w, 20).build());
+            savePngButton = addDrawableChild(MapKlussButton.builder(Text.literal("PNG"), button -> savePng()).action("scan.save_png").exportAction().tooltip(CompanionI18n.text("Сохранить PNG скана")).dimensions(left + (w + gap) * 2, rowY, w, 20).build());
+            uploadButton = addDrawableChild(MapKlussButton.builder(Text.literal("В облако"), button -> uploadScan()).action("scan.upload_cloud").special().tooltip(CompanionI18n.text("Загрузить скан в облако")).dimensions(left + (w + gap) * 3, rowY, w, 20).build());
+            refreshImportButton = addDrawableChild(MapKlussButton.builder(Text.literal("Проверить"), button -> refreshImportStatus()).action("scan.import_refresh").tooltip(CompanionI18n.text("Проверить состояние импорта")).dimensions(left + (w + gap) * 4, rowY, panelWidth - (w + gap) * 4, 20).build());
             return;
         }
         if (actionPage == 1) {
             int w = Math.max(36, (panelWidth - gap * 4) / 5);
-            addDrawableChild(MapKlussButton.builder(Text.literal("Угол A"), button -> setCornerA()).tooltip(CompanionI18n.text("Запомнить первый угол стены")).dimensions(left, rowY, w, 20).build());
-            addDrawableChild(MapKlussButton.builder(Text.literal("Угол B"), button -> setCornerB()).tooltip(CompanionI18n.text("Запомнить второй угол стены")).dimensions(left + w + gap, rowY, w, 20).build());
-            savePngButton = addDrawableChild(MapKlussButton.builder(Text.literal("PNG"), button -> savePng()).exportAction().tooltip(CompanionI18n.text("Сохранить PNG скана")).dimensions(left + (w + gap) * 2, rowY, w, 20).build());
-            uploadButton = addDrawableChild(MapKlussButton.builder(Text.literal("В облако"), button -> uploadScan()).special().tooltip(CompanionI18n.text("Загрузить скан в облако")).dimensions(left + (w + gap) * 3, rowY, w, 20).build());
-            refreshImportButton = addDrawableChild(MapKlussButton.builder(Text.literal("Проверить"), button -> refreshImportStatus()).tooltip(CompanionI18n.text("Проверить состояние импорта")).dimensions(left + (w + gap) * 4, rowY, panelWidth - (w + gap) * 4, 20).build());
-            return;
-        }
-        if (actionPage == 2) {
-            int w = Math.max(36, (panelWidth - gap * 4) / 5);
-            addDrawableChild(MapKlussButton.builder(Text.literal("Пред."), button -> selectHistory(-1)).tooltip(CompanionI18n.text("Предыдущий скан")).dimensions(left, rowY, w, 20).build());
-            loadButton = addDrawableChild(MapKlussButton.builder(Text.literal("Загрузить"), button -> loadSelectedHistory()).tooltip(CompanionI18n.text("Загрузить выбранный скан")).dimensions(left + w + gap, rowY, w, 20).build());
-            addDrawableChild(MapKlussButton.builder(Text.literal("След."), button -> selectHistory(1)).tooltip(CompanionI18n.text("Следующий скан")).dimensions(left + (w + gap) * 2, rowY, w, 20).build());
+            addDrawableChild(MapKlussButton.builder(Text.literal("Пред."), button -> selectHistory(-1)).action("scan.history_previous").tooltip(CompanionI18n.text("Предыдущий скан")).dimensions(left, rowY, w, 20).build());
+            loadButton = addDrawableChild(MapKlussButton.builder(Text.literal("Загрузить"), button -> loadSelectedHistory()).action("scan.history_load").tooltip(CompanionI18n.text("Загрузить выбранный скан")).dimensions(left + w + gap, rowY, w, 20).build());
+            addDrawableChild(MapKlussButton.builder(Text.literal("След."), button -> selectHistory(1)).action("scan.history_next").tooltip(CompanionI18n.text("Следующий скан")).dimensions(left + (w + gap) * 2, rowY, w, 20).build());
             deleteButton = addDrawableChild(MapKlussButton.builder(Text.literal(deleteConfirmation.armed() ? "Подтвердить удаление" : "Удалить"), button -> requestDeleteSelectedHistory()).danger()
+                .action("scan.history_delete")
                 .tooltip(CompanionI18n.text("Удалить скан из локальной истории")).navigationOrder(1000)
                 .dimensions(left + (w + gap) * 3, rowY, w, 20).build());
-            folderButton = addDrawableChild(MapKlussButton.builder(Text.literal("Папка"), button -> openLocalScanPath()).tooltip(CompanionI18n.text("Открыть папку скана")).dimensions(left + (w + gap) * 4, rowY, panelWidth - (w + gap) * 4, 20).build());
+            folderButton = addDrawableChild(MapKlussButton.builder(Text.literal("Папка"), button -> openLocalScanPath()).action("scan.open_folder").tooltip(CompanionI18n.text("Открыть папку скана")).dimensions(left + (w + gap) * 4, rowY, panelWidth - (w + gap) * 4, 20).build());
             return;
         }
         int w = Math.max(52, (panelWidth - gap * 2) / 3);
-        artButton = addDrawableChild(MapKlussButton.builder(Text.literal("Арт"), button -> openSavedArt()).technical().dimensions(left, rowY, w, 20).build());
-        editorButton = addDrawableChild(MapKlussButton.builder(Text.literal("Редактор"), button -> openEditor()).technical().dimensions(left + w + gap, rowY, w, 20).build());
-        cloudButton = addDrawableChild(MapKlussButton.builder(Text.literal("Облако"), button -> openCloud()).technical().dimensions(left + (w + gap) * 2, rowY, panelWidth - (w + gap) * 2, 20).build());
+        artButton = addDrawableChild(MapKlussButton.builder(Text.literal("Арт"), button -> openSavedArt()).action("scan.open_art").technical().dimensions(left, rowY, w, 20).build());
+        editorButton = addDrawableChild(MapKlussButton.builder(Text.literal("Редактор"), button -> openEditor()).action("scan.open_editor").technical().dimensions(left + w + gap, rowY, w, 20).build());
+        cloudButton = addDrawableChild(MapKlussButton.builder(Text.literal("Облако"), button -> openCloud()).action("scan.open_cloud").technical().dimensions(left + (w + gap) * 2, rowY, panelWidth - (w + gap) * 2, 20).build());
+    }
+
+    private void addScanModeControls(CompanionUiLayout.Rect work) {
+        int gap = 6;
+        int y = work.y() + 30;
+        int w = Math.max(42, (work.width() - gap * 3) / 4);
+        addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Из руки"), button -> scanHand())
+            .action("scan.hand")
+            .tooltip(CompanionI18n.text("Сканировать карту в руке")).dimensions(work.x(), y, w, 22).build());
+        addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Рамка"), button -> scanFrame())
+            .action("scan.frame")
+            .tooltip(CompanionI18n.text("Сканировать рамку под прицелом")).dimensions(work.x() + w + gap, y, w, 22).build());
+        addDrawableChild(MapKlussButton.builder(CompanionI18n.text("Стена"), button -> scanWall())
+            .action("scan.wall")
+            .tooltip(CompanionI18n.text("Найти всю стену карт автоматически")).dimensions(work.x() + (w + gap) * 2, y, w, 22).build());
+        addDrawableChild(MapKlussButton.builder(CompanionI18n.text("По углам"), button -> scanManualWall())
+            .action("scan.corners")
+            .tooltip(CompanionI18n.text("Сканировать область между углами A и B")).dimensions(work.x() + (w + gap) * 3, y, work.width() - (w + gap) * 3, 22).build());
     }
 
     private int actionTabsY() {
-        return Math.max(108, height - 78);
+        CompanionUiLayout.Rect work = scanWork(scanShell());
+        return work.bottom() - 50;
     }
 
     private void addSideRailControls(int railLeft) {
@@ -147,42 +159,59 @@ public final class ScanScreen extends Screen {
         int halfWidth = (SIDE_RAIL_WIDTH - gap) / 2;
 
         addDrawableChild(MapKlussButton.builder(Text.literal("Рука"), button -> scanHand())
+            .action("scan.hand")
             .dimensions(railLeft, 78, halfWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Рамка"), button -> scanFrame())
+            .action("scan.frame")
             .dimensions(railLeft + halfWidth + gap, 78, halfWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Стена"), button -> scanWall())
+            .action("scan.wall")
             .dimensions(railLeft, 104, halfWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Вручную"), button -> scanManualWall())
+            .action("scan.corners")
             .dimensions(railLeft + halfWidth + gap, 104, halfWidth, 20).build());
 
         addDrawableChild(MapKlussButton.builder(Text.literal("Угол A"), button -> setCornerA())
+            .action("scan.corner_a")
             .dimensions(railLeft, 162, halfWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("Угол B"), button -> setCornerB())
+            .action("scan.corner_b")
             .dimensions(railLeft + halfWidth + gap, 162, halfWidth, 20).build());
         savePngButton = addDrawableChild(MapKlussButton.builder(Text.literal("Сохранить PNG"), button -> savePng()).exportAction()
+            .action("scan.save_png")
             .dimensions(railLeft, 188, SIDE_RAIL_WIDTH, 20).build());
         uploadButton = addDrawableChild(MapKlussButton.builder(Text.literal("В облако"), button -> uploadScan()).special()
+            .action("scan.upload_cloud")
             .dimensions(railLeft, 214, SIDE_RAIL_WIDTH, 20).build());
         refreshImportButton = addDrawableChild(MapKlussButton.builder(Text.literal("Проверить импорт"), button -> refreshImportStatus())
+            .action("scan.import_refresh")
             .dimensions(railLeft, 240, SIDE_RAIL_WIDTH, 20).build());
 
         addDrawableChild(MapKlussButton.builder(Text.literal("Пред."), button -> selectHistory(-1))
+            .action("scan.history_previous")
             .dimensions(railLeft, 298, halfWidth, 20).build());
         addDrawableChild(MapKlussButton.builder(Text.literal("След."), button -> selectHistory(1))
+            .action("scan.history_next")
             .dimensions(railLeft + halfWidth + gap, 298, halfWidth, 20).build());
         loadButton = addDrawableChild(MapKlussButton.builder(Text.literal("Загрузить"), button -> loadSelectedHistory())
+            .action("scan.history_load")
             .dimensions(railLeft, 324, SIDE_RAIL_WIDTH, 20).build());
         deleteButton = addDrawableChild(MapKlussButton.builder(Text.literal("Удалить"), button -> deleteSelectedHistory()).danger()
+            .action("scan.history_delete")
             .dimensions(railLeft, 350, halfWidth, 20).build());
         folderButton = addDrawableChild(MapKlussButton.builder(Text.literal("Папка"), button -> openLocalScanPath())
+            .action("scan.open_folder")
             .dimensions(railLeft + halfWidth + gap, 350, halfWidth, 20).build());
 
         int openY = Math.max(390, height - 104);
         artButton = addDrawableChild(MapKlussButton.builder(Text.literal("Арт"), button -> openSavedArt()).technical()
+            .action("scan.open_art")
             .dimensions(railLeft, openY, halfWidth, 20).build());
         editorButton = addDrawableChild(MapKlussButton.builder(Text.literal("Редактор"), button -> openEditor()).technical()
+            .action("scan.open_editor")
             .dimensions(railLeft + halfWidth + gap, openY, halfWidth, 20).build());
         cloudButton = addDrawableChild(MapKlussButton.builder(Text.literal("Облако"), button -> openCloud()).technical()
+            .action("scan.open_cloud")
             .dimensions(railLeft, openY + 26, halfWidth, 20).build());
     }
 
@@ -518,28 +547,13 @@ public final class ScanScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        MapKlussUi.drawBackdrop(context, width, height);
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
-        int left = screenLeft(panelWidth);
-        boolean sideRail = sideRailLayout(panelWidth, left);
-        MapKlussUi.drawPanelAt(context, left - 10, left + panelWidth + 10, 46, MapKlussUi.panelBottom(height));
-        if (sideRail) {
-            int railLeft = sideRailLeft(panelWidth, left);
-            MapKlussUi.drawPanelAt(context, railLeft - 8, railLeft + SIDE_RAIL_WIDTH + 8, 46, MapKlussUi.panelBottom(height));
-            drawSideRailSections(context, railLeft);
-        }
-        MapKlussUi.drawSectionAt(context, textRenderer, null, left, panelWidth, 64, 38);
-        int detailsBottom = detailBottom();
-        if (detailsBottom > 112) {
-            MapKlussUi.drawSectionAt(context, textRenderer, null, left, panelWidth, 106, detailsBottom - 106);
-        }
-        if (height >= 178) {
-            MapKlussUi.drawSectionAt(context, textRenderer, null, left, panelWidth, actionTabsY() - 5, Math.max(26, height - actionTabsY() - 29));
-        }
-        if (!sideRail) drawActionGroups(context);
-        MapKlussUi.drawHeader(context, textRenderer, title.getString(), "", width, 14);
-        MapKlussUi.drawStatusIn(context, textRenderer, status, left + panelWidth / 2, 36, panelWidth - 16);
-        MapKlussUi.drawFieldLabel(context, textRenderer, "Название скана", left, 76, panelWidth);
+        CompanionUiLayout.Shell shell = MapKlussUi.drawShell(
+            context, textRenderer, width, height,
+            ScreenViewModel.shell(CompanionUiLayout.Destination.SCAN, CompanionI18n.translate("Скан"), status), false
+        );
+        CompanionUiLayout.Rect work = scanWork(shell);
+        int panelWidth = work.width();
+        int left = work.x();
         int detailBottom = detailBottom();
         if (draft == null && history.isEmpty()) {
             MapKlussUi.drawEmptyState(
@@ -548,20 +562,20 @@ public final class ScanScreen extends Screen {
                 "Сканов пока нет",
                 "Выбери карту в руке, рамку или стену с картами",
                 left,
-                132,
+                work.y() + 70,
                 panelWidth,
-                Math.max(40, detailBottom - 132)
+                Math.max(40, detailBottom - work.y() - 70)
             );
         }
         if (draft != null) {
             String size = (draft.wide() * 128) + "x" + (draft.tall() * 128) + " PNG";
             String warning = draft.missingMaps() == 0 ? "" : " / пропущено " + draft.missingMaps();
-            drawDetailLine(context, draft.title() + "  " + size + warning, 120, MapKlussUi.WHITE, detailBottom);
+            drawDetailLine(context, draft.title() + "  " + size + warning, work.y() + 70, MapKlussUi.WHITE, detailBottom);
         }
         if (cornerA != null || cornerB != null) {
             String a = cornerA == null ? "A: нет" : "A: " + cornerA.label();
             String b = cornerB == null ? "B: нет" : "B: " + cornerB.label();
-            drawDetailLine(context, a + " / " + b, 132, MapKlussUi.MUTED, detailBottom);
+            drawDetailLine(context, a + " / " + b, work.y() + 84, MapKlussUi.MUTED, detailBottom);
         }
         if (!history.isEmpty() && historyIndex >= 0 && historyIndex < history.size()) {
             ScanHistoryEntry entry = history.get(historyIndex);
@@ -570,7 +584,7 @@ public final class ScanScreen extends Screen {
             drawDetailLine(
                 context,
                 "История " + (historyIndex + 1) + "/" + history.size() + ": " + entry.title() + imported + active,
-                148,
+                work.y() + 102,
                 isSelectedHistoryActiveDraft() ? MapKlussUi.ACCENT : MapKlussUi.MUTED,
                 detailBottom
             );
@@ -578,23 +592,24 @@ public final class ScanScreen extends Screen {
             if (entry.missingMaps() > 0) {
                 sourceLine += " / пропущено " + entry.missingMaps();
             }
-            drawDetailLine(context, sourceLine, 160, MapKlussUi.MUTED, detailBottom);
+            drawDetailLine(context, sourceLine, work.y() + 116, MapKlussUi.MUTED, detailBottom);
 
             String localFile = Path.of(entry.localPath()).getFileName().toString();
-            drawDetailLine(context, "Локальный файл: " + localFile, 172, MapKlussUi.CYAN, detailBottom);
+            drawDetailLine(context, "Локальный файл: " + localFile, work.y() + 130, MapKlussUi.CYAN, detailBottom);
 
             String cloudLine = entry.hasImport()
                 ? "Импорт в облаке: " + entry.importId()
                 : "Импорт в облаке: еще не загружен";
-            drawDetailLine(context, cloudLine, 184, entry.hasImport() ? MapKlussUi.ACCENT : MapKlussUi.GOLD, detailBottom);
+            drawDetailLine(context, cloudLine, work.y() + 144, entry.hasImport() ? MapKlussUi.ACCENT : MapKlussUi.GOLD, detailBottom);
             if (entry.hasImport()) {
                 String artLine = entry.hasCreatedArt()
                     ? "Сохраненный арт: " + entry.createdArtId()
                     : "Сохраненный арт: еще не создан";
-                drawDetailLine(context, artLine, 196, entry.hasCreatedArt() ? MapKlussUi.ACCENT : MapKlussUi.GOLD, detailBottom);
+                drawDetailLine(context, artLine, work.y() + 158, entry.hasCreatedArt() ? MapKlussUi.ACCENT : MapKlussUi.GOLD, detailBottom);
             }
         }
         super.render(context, mouseX, mouseY, delta);
+        MapKlussUi.drawNavigation(context, shell, CompanionUiLayout.Destination.SCAN);
     }
 
     private void drawActionGroups(DrawContext context) {
@@ -610,9 +625,7 @@ public final class ScanScreen extends Screen {
     }
 
     private int detailBottom() {
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
-        int left = screenLeft(panelWidth);
-        return sideRailLayout(panelWidth, left) ? height - 24 : actionTop() - 8;
+        return actionTabsY() - 8;
     }
 
     private boolean sideRailLayout(int panelWidth, int left) {
@@ -624,14 +637,57 @@ public final class ScanScreen extends Screen {
     }
 
     private int screenLeft(int panelWidth) {
-        return MapKlussUi.centeredLeft(width, panelWidth);
+        return scanWork(scanShell()).x();
     }
 
     private void drawDetailLine(DrawContext context, String value, int y, int color, int detailBottom) {
         if (y + 9 > detailBottom) return;
-        int panelWidth = MapKlussUi.panelWidth(width, PANEL_WIDTH);
-        int left = screenLeft(panelWidth);
+        CompanionUiLayout.Rect work = scanWork(scanShell());
+        int panelWidth = work.width();
+        int left = work.x();
         MapKlussUi.drawCenteredIn(context, textRenderer, value, left + panelWidth / 2, y, panelWidth - 14, color);
+    }
+
+    private CompanionUiLayout.Shell scanShell() {
+        return CompanionUiLayout.shell(width, height, false);
+    }
+
+    private CompanionUiLayout.Rect scanWork(CompanionUiLayout.Shell shell) {
+        CompanionUiLayout.Rect content = shell.content();
+        return new CompanionUiLayout.Rect(content.x() + 14, content.y() + 12, Math.max(1, content.width() - 28), Math.max(1, content.height() - 24));
+    }
+
+    private void addNavigationControls(CompanionUiLayout.Shell shell) {
+        for (int i = 0; i <= CompanionUiLayout.Destination.ACCOUNT.ordinal(); i++) {
+            CompanionUiLayout.Destination destination = CompanionUiLayout.Destination.values()[i];
+            CompanionUiLayout.Rect rect = CompanionUiLayout.navigationButton(shell, i);
+            addDrawableChild(MapKlussButton.builder(Text.literal(""), button -> openDestination(destination))
+                .action(CompanionActionInventory.navigationAction(destination))
+                .tooltip(CompanionI18n.text(destinationLabel(destination)))
+                .dimensions(rect.x(), rect.y(), rect.width(), rect.height()).build());
+        }
+    }
+
+    private void openDestination(CompanionUiLayout.Destination destination) {
+        switch (destination) {
+            case LIBRARY -> client().setScreen(new CompanionLibraryScreen(this));
+            case LENS -> client().setScreen(new LensScreen(this));
+            case SCAN -> { }
+            case TRACKER -> client().setScreen(new TrackerOpenScreen(this));
+            case ACCOUNT -> client().setScreen(new CompanionAccountScreen(this));
+            default -> { }
+        }
+    }
+
+    private String destinationLabel(CompanionUiLayout.Destination destination) {
+        return switch (destination) {
+            case LIBRARY -> "Библиотека";
+            case LENS -> "Lens";
+            case SCAN -> "Скан";
+            case TRACKER -> "Трекер";
+            case ACCOUNT -> "Аккаунт";
+            default -> destination.name();
+        };
     }
 
     private Path scanPath(String title) {

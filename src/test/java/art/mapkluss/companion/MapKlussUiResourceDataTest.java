@@ -33,8 +33,8 @@ final class MapKlussUiResourceDataTest {
         assertEquals(0xFF123456, snapshot.color("cyan"));
         assertEquals(0x80112233, snapshot.color("backdrop"));
         assertEquals(13, snapshot.metric("header_inset"));
-        assertEquals(0xFF57FF6E, snapshot.color("accent"));
-        assertEquals(84, snapshot.metric("back_width"));
+        assertEquals(UiTheme.LIME, snapshot.color("accent"));
+        assertEquals(76, snapshot.metric("back_width"));
     }
 
     @Test

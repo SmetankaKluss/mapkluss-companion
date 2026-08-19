@@ -176,6 +176,7 @@ tasks.withType(JavaExec).configureEach {
 
 test {
     useJUnitPlatform()
+    systemProperty 'mapkluss.test.minecraftVersion', targetMinecraft
 }
 
 processResources {

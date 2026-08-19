@@ -49,9 +49,11 @@ final class MapKlussUiLabModel {
 
     enum Viewport {
         CURRENT("Auto", 0, 0),
-        COMPACT("498×280", 498, 280),
+        MINIMUM("320×240", 320, 240),
+        COMPACT("480×270", 480, 270),
         STANDARD("640×360", 640, 360),
-        WIDE("860×480", 860, 480);
+        WIDE("960×540", 960, 540),
+        ULTRAWIDE("1280×720", 1280, 720);
 
         private final String label;
         private final int width;
@@ -76,9 +78,24 @@ final class MapKlussUiLabModel {
         }
     }
 
+    enum GuiScale {
+        AUTO("Auto"), TWO("2"), THREE("3"), FOUR("4");
+
+        private final String label;
+
+        GuiScale(String label) {
+            this.label = label;
+        }
+
+        String label() {
+            return label;
+        }
+    }
+
     private Page page = Page.LIBRARY;
     private State state = State.POPULATED;
     private Viewport viewport = Viewport.CURRENT;
+    private GuiScale guiScale = GuiScale.AUTO;
     private boolean english;
     private boolean longCopy;
     private boolean guides;
@@ -94,6 +111,10 @@ final class MapKlussUiLabModel {
 
     Viewport viewport() {
         return viewport;
+    }
+
+    GuiScale guiScale() {
+        return guiScale;
     }
 
     boolean english() {
@@ -130,6 +151,10 @@ final class MapKlussUiLabModel {
 
     void nextViewport() {
         viewport = next(Viewport.values(), viewport);
+    }
+
+    void nextGuiScale() {
+        guiScale = next(GuiScale.values(), guiScale);
     }
 
     void toggleLanguage() {
@@ -179,6 +204,16 @@ final class MapKlussUiLabModel {
 
     boolean populated() {
         return state == State.POPULATED || state == State.SUCCESS;
+    }
+
+    ScreenViewModel.StatusKind statusKind() {
+        return switch (state) {
+            case LOADING -> ScreenViewModel.StatusKind.LOADING;
+            case SUCCESS, POPULATED -> ScreenViewModel.StatusKind.SUCCESS;
+            case WARNING -> ScreenViewModel.StatusKind.WARNING;
+            case ERROR -> ScreenViewModel.StatusKind.ERROR;
+            case EMPTY, DISABLED -> ScreenViewModel.StatusKind.IDLE;
+        };
     }
 
     boolean actionsEnabled() {
