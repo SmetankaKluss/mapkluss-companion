@@ -16,52 +16,68 @@ final class CompanionAccountScreen extends Screen {
     private String status = "";
     private boolean detailsVisible;
     private boolean logoutArmed;
+    private int updateRequest;
+    private boolean checkingUpdate;
+    private final boolean fixture;
+    private WorkshopTheme theme = WorkshopTheme.of(WorkshopTheme.DEFAULT_ID);
 
     CompanionAccountScreen(Screen parent) {
+        this(parent, false);
+    }
+
+    CompanionAccountScreen(Screen parent, boolean fixture) {
         super(CompanionI18n.text("Аккаунт"));
         this.parent = parent;
+        this.fixture = fixture;
     }
 
     @Override
     protected void init() {
         clearWidgets();
-        refreshSession();
-        CompanionUiLayout.Shell shell = accountShell();
-        addNavigationControls(shell);
-
-        CompanionUiLayout.Rect content = shell.content();
-        int x = content.x() + 16;
-        int available = Math.max(120, content.width() - 32);
-        int cardWidth = Math.min(460, available);
-        int gap = 6;
-        int buttonWidth = Math.max(72, (cardWidth - gap) / 2);
-        int y = accountActionsY(content);
-
-        MapKlussButton.Builder account = MapKlussButton.builder(CompanionI18n.text(isSignedIn() ? "Выйти" : "Войти"), button -> accountAction())
-            .action(isSignedIn() ? "account.logout" : "account.login_start")
-            .selected(!isSignedIn()).dimensions(x, y, buttonWidth, 22);
-        if (isSignedIn()) account.danger();
-        addRenderableWidget(account.build());
-        addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Сайт облака"), button -> openSite("/cloud"))
-            .action("account.open_site")
-            .technical().dimensions(x + buttonWidth + gap, y, buttonWidth, 22).build());
-        addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Синхронизация"), button -> client().gui.setScreen(new CompanionLibraryScreen(this, true)))
-            .action("account.sync")
-            .enabledWhen(this::isSignedIn).dimensions(x, y + 30, buttonWidth, 22).build());
-        addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Проверить обновление"), button -> checkForUpdate())
-            .action("account.update")
-            .dimensions(x + buttonWidth + gap, y + 30, buttonWidth, 22).build());
-        boolean telemetryEnabled = CompanionTelemetryManager.consent() == CompanionTelemetrySettings.Consent.ENABLED;
-        addRenderableWidget(MapKlussButton.builder(CompanionI18n.text(telemetryEnabled ? "Анонимная статистика: вкл." : "Анонимная статистика: выкл."), button -> toggleTelemetry())
-            .action("account.telemetry")
-            .selected(telemetryEnabled).dimensions(x, y + 60, cardWidth, 20).build());
-        addRenderableWidget(MapKlussButton.builder(CompanionI18n.text(detailsVisible ? "Скрыть детали" : "Детали"), button -> {
-            detailsVisible = !detailsVisible;
-            init();
-        }).action("account.details").dimensions(x, y + 88, cardWidth, 20).build());
-
-        addRenderableWidget(MapKlussUi.languageButtonAt(this, shell.topBar().right() - 38, shell.topBar().y() + 9));
+        if (!fixture) refreshSession();
+        try { theme = WorkshopTheme.of(CompanionConfig.load(client().gameDirectory.toPath()).theme()); }
+        catch (Exception ignored) { }
+        var shell = WorkshopLayout.account(width, height);
+        var nav = shell.navigation();
+        int slot = (nav.width() - 28) / 5;
+        WorkshopIcon[] icons = {WorkshopIcon.LIBRARY, WorkshopIcon.LENS, WorkshopIcon.SCAN, WorkshopIcon.TRACKER, WorkshopIcon.ACCOUNT};
+        for (int i = 0; i < 5; i++) {
+            var destination = CompanionUiLayout.Destination.values()[i];
+            accountButton(CompanionActionInventory.navigationAction(destination), destinationLabel(destination), icons[i],
+                new WorkshopLayout.Rect(nav.x() + i * slot, nav.y(), slot - 4, nav.height()),
+                true, i == 4, () -> openDestination(destination));
+        }
+        accountButton("global.back", "Назад", WorkshopIcon.CLOSE, new WorkshopLayout.Rect(nav.right() - 24, nav.y(), 24, nav.height()), true, false, this::onClose);
+        var footer = shell.footer();
+        accountButton("account.details", detailsVisible ? "Назад" : "Детали", detailsVisible ? WorkshopIcon.BACK : WorkshopIcon.MORE,
+            new WorkshopLayout.Rect(footer.right() - 92, footer.y(), 92, 20), true, detailsVisible, () -> { detailsVisible = !detailsVisible; init(); });
+        if (detailsVisible) return;
+        int left = nav.x(), top = shell.preview().y(), gap = 6, w = (nav.width() - gap) / 2;
+        accountButton(isSignedIn() ? "account.logout" : "account.login_start", logoutArmed ? "Подтвердить выход" : isSignedIn() ? "Выйти" : "Войти",
+            WorkshopIcon.ACCOUNT, new WorkshopLayout.Rect(left, top, w, 24), true, !isSignedIn(), this::accountAction);
+        accountButton("account.open_site", "Сайт облака", WorkshopIcon.LINK, new WorkshopLayout.Rect(left+w+gap, top, w, 24), !fixture, false, () -> openSite("/cloud"));
+        accountButton("account.sync", "Синхронизация", WorkshopIcon.REFRESH, new WorkshopLayout.Rect(left, top+30, w, 24), !fixture && isSignedIn(), false, () -> client().gui.setScreen(new CompanionLibraryScreen(this, true)));
+        accountButton("account.update", "Проверить обновление", WorkshopIcon.DOWNLOAD, new WorkshopLayout.Rect(left+w+gap, top+30, w, 24), !checkingUpdate, false, this::checkForUpdate);
+        accountButton("account.theme", CompanionI18n.english(client()) ? "Appearance" : "Оформление", WorkshopIcon.LAYERS,
+            new WorkshopLayout.Rect(left, top+60, w, 24), true, false, () -> client().gui.setScreen(new WorkshopAppearanceScreen(this)));
+        accountButton("global.language", CompanionI18n.english(client()) ? "English / RU" : "Русский / EN", null,
+            new WorkshopLayout.Rect(left+w+gap, top+60, w, 24), true, false, () -> {
+                try { CompanionI18n.toggle(client()); init(); }
+                catch (Exception e) { status = "Не удалось сохранить выбор."; }
+            });
+        boolean telemetryEnabled = !fixture && CompanionTelemetryManager.consent() == CompanionTelemetrySettings.Consent.ENABLED;
+        accountButton("account.telemetry", telemetryEnabled ? "Анонимная статистика: вкл." : "Анонимная статистика: выкл.", null,
+            new WorkshopLayout.Rect(left, top+90, nav.width(), 24), !fixture, telemetryEnabled, this::toggleTelemetry);
     }
+
+    private void accountButton(String id, String label, WorkshopIcon icon, WorkshopLayout.Rect r, boolean enabled, boolean selected, Runnable callback) {
+        var builder = MapKlussButton.builder(CompanionI18n.text(label), button -> callback.run()).action(id)
+            .enabledWhen(() -> enabled).selected(selected).tooltip(CompanionI18n.text(label))
+            .dimensions(r.x(),r.y(),r.width(),r.height());
+        if ("account.logout".equals(id)) builder.danger();
+        addRenderableWidget(builder.build().workshop(theme, icon));
+    }
+
 
     private void addNavigationControls(CompanionUiLayout.Shell shell) {
         for (int i = 0; i <= CompanionUiLayout.Destination.ACCOUNT.ordinal(); i++) {
@@ -77,9 +93,9 @@ final class CompanionAccountScreen extends Screen {
     private void openDestination(CompanionUiLayout.Destination destination) {
         switch (destination) {
             case LIBRARY -> client().gui.setScreen(new CompanionLibraryScreen(this));
-            case LENS -> client().gui.setScreen(new LensScreen(this));
-            case SCAN -> client().gui.setScreen(new ScanScreen(this));
-            case TRACKER -> client().gui.setScreen(new TrackerOpenScreen(this));
+            case LENS -> client().gui.setScreen(new LensScreen(this, fixture));
+            case SCAN -> client().gui.setScreen(new ScanScreen(this, fixture));
+            case TRACKER -> client().gui.setScreen(new TrackerOpenScreen(this, fixture));
             case ACCOUNT -> { }
             default -> { }
         }
@@ -112,6 +128,7 @@ final class CompanionAccountScreen extends Screen {
     }
 
     private void accountAction() {
+        if (fixture) { client().gui.setScreen(new DeviceLoginScreen(this, true)); return; }
         if (!isSignedIn()) {
             client().gui.setScreen(new DeviceLoginScreen(this));
             return;
@@ -148,12 +165,22 @@ final class CompanionAccountScreen extends Screen {
     }
 
     private void checkForUpdate() {
+        if (fixture) { client().gui.setScreen(new CompanionUpdateScreen(this, "0.14.0", true)); return; }
+        if (checkingUpdate) return;
+        checkingUpdate = true;
+        int request = ++updateRequest;
         status = "Проверяю обновления...";
         String currentVersion = FabricLoader.getInstance()
             .getModContainer(MapKlussCompanionClient.MOD_ID)
             .map(container -> container.getMetadata().getVersion().getFriendlyString())
             .orElse("");
-        new CompanionReleaseChecker().findUpdate(currentVersion).thenAccept(release -> client().execute(() -> {
+        new CompanionReleaseChecker().findUpdate(currentVersion).whenComplete((release, error) -> client().execute(() -> {
+            if (request != updateRequest || client().gui.screen() != this) return;
+            checkingUpdate = false;
+            if (error != null) {
+                status = CompanionUiErrors.message("update", error);
+                return;
+            }
             if (release.isPresent()) {
                 client().gui.setScreen(new CompanionUpdateScreen(this, release.get().version()));
             } else {
@@ -161,6 +188,13 @@ final class CompanionAccountScreen extends Screen {
                 init();
             }
         }));
+    }
+
+    @Override
+    public void removed() {
+        updateRequest++;
+        checkingUpdate = false;
+        super.removed();
     }
 
     private void toggleTelemetry() {
@@ -178,48 +212,33 @@ final class CompanionAccountScreen extends Screen {
         }
     }
 
-    @Override
-    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
-        CompanionUiLayout.Shell shell = MapKlussUi.drawShell(
-            context, font, width, height,
-            ScreenViewModel.shell(CompanionUiLayout.Destination.ACCOUNT, CompanionI18n.translate("Аккаунт"), status), false
-        );
-        CompanionUiLayout.Rect content = shell.content();
-        int x = content.x() + 16;
-        int available = Math.max(120, content.width() - 32);
-        int cardWidth = Math.min(460, available);
-        int y = content.y() + 14;
-        context.fill(x, y, x + cardWidth, y + Math.min(190, content.height() - 28), UiTheme.SURFACE_RAISED);
-        context.fill(x, y, x + 3, y + Math.min(190, content.height() - 28), isSignedIn() ? UiTheme.LIME : UiTheme.AMBER);
-        MapKlussUi.drawLeft(context, font, CompanionI18n.translate(isSignedIn() ? "Cloud подключён" : "Вход не выполнен"), x + 14, y + 12, cardWidth - 28, MapKlussUi.WHITE);
-        MapKlussUi.drawLeft(context, font,
-            CompanionI18n.translate(isSignedIn() ? "Библиотека, Lens и прогресс синхронизируются" : "Войдите через код на сайте MapKluss"),
-            x + 14, y + 29, cardWidth - 28, MapKlussUi.MUTED);
-        if (detailsVisible && session != null) {
-            int detailsY = accountActionsY(content) + 116;
-            if (detailsY + 39 <= content.bottom() - 8) {
-                MapKlussUi.drawLeft(context, font, "ID: " + session.shortUserId(), x + 14, detailsY, cardWidth - 28, MapKlussUi.MUTED);
-                MapKlussUi.drawLeft(context, font, CompanionI18n.translate("Сохранено: ") + safe(session.savedAt()), x + 14, detailsY + 15, cardWidth - 28, MapKlussUi.DIM);
-                MapKlussUi.drawLeft(context, font, CompanionI18n.translate("Истекает: ") + safe(session.expiresAt()), x + 14, detailsY + 30, cardWidth - 28, MapKlussUi.DIM);
-            }
-        }
-        super.extractRenderState(context, mouseX, mouseY, delta);
-        MapKlussUi.drawNavigation(context, shell, CompanionUiLayout.Destination.ACCOUNT);
-    }
 
     @Override
     public void onClose() {
         if (minecraft != null) minecraft.gui.setScreen(parent);
     }
 
-    private CompanionUiLayout.Shell accountShell() {
-        return CompanionUiLayout.shell(width, height, false);
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+        context.fill(0,0,width,height,0x88000000);
+        var shell = WorkshopLayout.account(width,height);
+        WorkshopChrome.frame(context::fill,shell.frame(),theme);
+        var nav=shell.navigation();
+        context.fill(nav.x(),nav.bottom()+1,nav.right(),nav.bottom()+2,theme.color("border-subtle"));
+        var heading=shell.tabs();
+        WorkshopDraw.text(context,font,CompanionI18n.translate(isSignedIn() ? "Cloud подключён" : "Вход не выполнен"),heading.x()+4,heading.y()+8,heading.width()-8,theme.color(isSignedIn() ? "success" : "text-secondary"));
+        if(detailsVisible) {
+            int y=shell.preview().y()+8;
+            String[] lines=session==null ? new String[]{CompanionI18n.translate("Вход не выполнен")} : new String[]{"ID: "+session.shortUserId(),CompanionI18n.translate("Сохранено: ")+safe(session.savedAt()),CompanionI18n.translate("Истекает: ")+safe(session.expiresAt())};
+            for(String line:lines) { WorkshopDraw.text(context,font,line,nav.x()+4,y,nav.width()-8,theme.color("text-secondary")); y+=22; }
+        }
+        var footer=shell.footer();
+        context.fill(footer.x(),footer.y()-3,footer.right(),footer.y()-2,theme.color("border-subtle"));
+        WorkshopDraw.text(context,font,CompanionI18n.translate(status),footer.x()+4,footer.y()+6,footer.width()-104,theme.color("text-secondary"));
+        super.extractRenderState(context,mouseX,mouseY,delta);
     }
 
-    private int accountActionsY(CompanionUiLayout.Rect content) {
-        int offset = CompanionUiLayout.clamp(content.height() - 96, 54, 94);
-        return content.y() + offset;
-    }
+
 
     private String safe(String value) {
         return value == null || value.isBlank() ? "—" : value;

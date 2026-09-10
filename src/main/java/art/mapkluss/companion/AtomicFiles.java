@@ -49,6 +49,14 @@ final class AtomicFiles {
     }
 
     static void write(Path path, byte[] value, boolean privateFile) throws IOException {
+        write(path, value, privateFile, false);
+    }
+
+    static void writePrivateAtomic(Path path, byte[] value) throws IOException {
+        write(path, value, true, true);
+    }
+
+    private static void write(Path path, byte[] value, boolean privateFile, boolean requireAtomic) throws IOException {
         withLock(path, () -> {
             Path absolute = path.toAbsolutePath().normalize();
             Path parent = absolute.getParent();
@@ -58,10 +66,16 @@ final class AtomicFiles {
             Path temporary = Files.createTempFile(parent, absolute.getFileName().toString() + ".", ".tmp");
             try {
                 Files.write(temporary, value);
+                if (requireAtomic) {
+                    try (var channel = java.nio.channels.FileChannel.open(temporary, java.nio.file.StandardOpenOption.WRITE)) {
+                        channel.force(true);
+                    }
+                }
                 if (privateFile) setPermissions(temporary, OWNER_FILE);
                 try {
                     Files.move(temporary, absolute, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
                 } catch (AtomicMoveNotSupportedException ignored) {
+                    if (requireAtomic) throw ignored;
                     Files.move(temporary, absolute, StandardCopyOption.REPLACE_EXISTING);
                 }
                 if (privateFile) setPermissions(absolute, OWNER_FILE);

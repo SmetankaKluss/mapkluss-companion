@@ -58,6 +58,15 @@ final class CompanionApiClientBoundedDownloadTest {
         assertEquals("http://127.0.0.1:54321/storage/signed",
             CompanionApiClient.requireSignedArtifactUri(localDev).toString());
 
+        assertEquals("https://storage.yandexcloud.net/mapkluss-lens/preview.png?X-Amz-Signature=test",
+            CompanionApiClient.requireTrustedDownloadUri(
+                "https://storage.yandexcloud.net/mapkluss-lens/preview.png?X-Amz-Signature=test").toString());
+        assertEquals("https://mapkluss-lens.storage.yandexcloud.net/preview.png?X-Amz-Signature=test",
+            CompanionApiClient.requireTrustedDownloadUri(
+                "https://mapkluss-lens.storage.yandexcloud.net/preview.png?X-Amz-Signature=test").toString());
+
         assertThrows(IOException.class, () -> CompanionApiClient.requireTrustedDownloadUri("https://example.com/preview.png"));
+        assertThrows(IOException.class, () -> CompanionApiClient.requireTrustedDownloadUri(
+            "https://storage.yandexcloud.net.evil.example/preview.png"));
     }
 }

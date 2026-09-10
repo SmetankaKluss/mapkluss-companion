@@ -46,6 +46,25 @@ public final class LensApiClient {
     public LensDtos.Capabilities capabilities() throws IOException, InterruptedException {
         return post(action("capabilities"), LensDtos.Capabilities.class);
     }
+    private record Started(LensDtos.Session session,String publisherLease) { }
+    public LensDtos.Session start(CompanionManifest manifest,byte[] preview)throws IOException,InterruptedException {
+        var body=action("session_start");
+        body.addProperty("title",manifest.title());body.add("grid",GSON.toJsonTree(manifest.grid()));
+        body.addProperty("mapMode",manifest.mode());
+        var started=post(body,Started.class);
+        var publish=action("session_seed");
+        publish.addProperty("sessionId",started.session().sessionId());
+        publish.addProperty("baseRevision",started.session().revision());
+        publish.addProperty("publisherLease",started.publisherLease());
+        publish.addProperty("title",manifest.title());publish.add("grid",GSON.toJsonTree(manifest.grid()));
+        publish.addProperty("mapMode",manifest.mode());publish.addProperty("tileResolution",128);
+        publish.addProperty("sha256",SuppressionHashes.sha256(preview));
+        publish.addProperty("previewBase64",java.util.Base64.getEncoder().encodeToString(preview));
+        var s=post(publish,LensDtos.SessionResult.class).session();
+        return new LensDtos.Session(s.sessionId(),s.title(),s.status(),s.grid(),s.mapMode(),s.revision(),
+            s.tileResolution(),s.previewWidth(),s.previewHeight(),s.viewerCount(),s.editorLastSeenAt(),s.expiresAt(),
+            started.session().sessionCode(),s.ownedByUser(),s.realtime());
+    }
 
     public LensDtos.SessionList sessionList() throws IOException, InterruptedException {
         return post(action("session_list"), LensDtos.SessionList.class);
@@ -66,12 +85,14 @@ public final class LensApiClient {
     public LensDtos.PollResult poll(
         String sessionId,
         long knownRevision,
+        boolean needsPreview,
         String serverHash,
         String dimensionId
     ) throws IOException, InterruptedException {
         JsonObject body = action("session_poll");
         body.addProperty("sessionId", sessionId);
         body.addProperty("knownRevision", knownRevision);
+        body.addProperty("needsPreview", needsPreview);
         addOptional(body, "serverHash", serverHash);
         addOptional(body, "dimensionId", dimensionId);
         return post(body, LensDtos.PollResult.class);

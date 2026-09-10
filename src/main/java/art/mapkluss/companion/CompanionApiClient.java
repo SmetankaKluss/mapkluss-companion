@@ -244,7 +244,8 @@ public class CompanionApiClient {
         String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(java.util.Locale.ROOT);
         boolean loopback = "localhost".equals(host) || "127.0.0.1".equals(host) || "::1".equals(host);
         boolean trustedHost = loopback || "api.mapkluss.art".equals(host) || host.endsWith(".supabase.co")
-            || host.endsWith(".storage.yandexcloud.net");
+            // Yandex Object Storage signs URLs with both the root endpoint and virtual-host bucket URLs.
+            || "storage.yandexcloud.net".equals(host) || host.endsWith(".storage.yandexcloud.net");
         boolean secureScheme = "https".equalsIgnoreCase(uri.getScheme())
             || (loopback && "http".equalsIgnoreCase(uri.getScheme()));
         if (!uri.isAbsolute() || !secureScheme || !trustedHost || uri.getUserInfo() != null) {

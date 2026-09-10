@@ -2,6 +2,9 @@ package art.mapkluss.companion;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class SuppressionStartLayoutTest {
@@ -20,5 +23,17 @@ final class SuppressionStartLayoutTest {
             assertTrue(layout.cloudY() >= layout.top() + 40);
             assertTrue(layout.localY() >= layout.cloudY());
         }
+    }
+
+    @Test
+    void keepsInstalledSchemeGuidanceSeparateFromZipImportFailures() {
+        assertEquals(
+            "Схема установлена. В инвентаре несколько подходящих карт: возьмите нужную в основную руку и запустите её ещё раз.",
+            SuppressionManager.startFailureMessage(new IOException("Возьмите нужную карту в руку"))
+        );
+        assertEquals(
+            "Схема установлена. Добавьте незаблокированную заполненную карту масштаба 0 и запустите её ещё раз.",
+            SuppressionManager.startFailureMessage(new IOException("Подготовьте незаблокированную карту масштаба 0"))
+        );
     }
 }

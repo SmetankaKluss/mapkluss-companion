@@ -22,6 +22,7 @@ public final class CompanionConfig {
     private final String siteUrl;
     private final String language;
     private final String gatewayUrl;
+    private final String theme;
     private String accessToken;
 
     public CompanionConfig() {
@@ -41,11 +42,16 @@ public final class CompanionConfig {
     }
 
     public CompanionConfig(String supabaseUrl, String supabaseAnonKey, String siteUrl, String language, String gatewayUrl) {
+        this(supabaseUrl, supabaseAnonKey, siteUrl, language, gatewayUrl, WorkshopTheme.DEFAULT_ID);
+    }
+
+    public CompanionConfig(String supabaseUrl, String supabaseAnonKey, String siteUrl, String language, String gatewayUrl, String theme) {
         this.supabaseUrl = stripTrailingSlash(blankToDefault(supabaseUrl, DEFAULT_SUPABASE_URL));
         this.supabaseAnonKey = blankToDefault(supabaseAnonKey, DEFAULT_SUPABASE_ANON_KEY);
         this.siteUrl = stripTrailingSlash(blankToDefault(siteUrl, DEFAULT_SITE_URL));
         this.language = normalizeLanguage(language);
         this.gatewayUrl = stripTrailingSlash(blankToDefault(gatewayUrl, DEFAULT_GATEWAY_URL));
+        this.theme = WorkshopTheme.normalize(theme);
     }
 
     public static CompanionConfig load(Path minecraftRunDir) throws IOException {
@@ -63,11 +69,12 @@ public final class CompanionConfig {
             stringField(json, "supabaseAnonKey", DEFAULT_SUPABASE_ANON_KEY),
             stringField(json, "siteUrl", DEFAULT_SITE_URL),
             stringField(json, "language", DEFAULT_LANGUAGE),
-            stringField(json, "gatewayUrl", DEFAULT_GATEWAY_URL)
+            stringField(json, "gatewayUrl", DEFAULT_GATEWAY_URL),
+            stringField(json, "theme", WorkshopTheme.DEFAULT_ID)
         );
         if (isLocalhostUrl(config.siteUrl())) {
             config = new CompanionConfig(
-                config.supabaseUrl(), config.supabaseAnonKey(), DEFAULT_SITE_URL, config.language(), config.gatewayUrl()
+                config.supabaseUrl(), config.supabaseAnonKey(), DEFAULT_SITE_URL, config.language(), config.gatewayUrl(), config.theme()
             );
             config.save(path);
         }
@@ -92,6 +99,16 @@ public final class CompanionConfig {
 
     public String gatewayUrl() {
         return gatewayUrl;
+    }
+
+    public String theme() { return theme; }
+
+    public CompanionConfig withTheme(String value) {
+        return new CompanionConfig(supabaseUrl, supabaseAnonKey, siteUrl, language, gatewayUrl, value);
+    }
+
+    public CompanionConfig withLanguage(String value) {
+        return new CompanionConfig(supabaseUrl, supabaseAnonKey, siteUrl, value, gatewayUrl, theme);
     }
 
     public URI siteUri(String path) {
@@ -120,6 +137,7 @@ public final class CompanionConfig {
         json.addProperty("siteUrl", siteUrl);
         json.addProperty("language", language);
         json.addProperty("gatewayUrl", gatewayUrl);
+        json.addProperty("theme", theme);
         AtomicFiles.writePrivateUtf8(path, GSON.toJson(json));
     }
 

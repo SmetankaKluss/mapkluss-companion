@@ -67,62 +67,122 @@ public final class CompanionArtScreen extends Screen {
     private CompanionManifest manifest;
     private String status = "";
     private String privacyDraft;
+    private boolean privacyDirty;
     private boolean deleteArmed;
     private int actionPage;
+    private boolean compactPreview;
+    private final boolean fixture;
+    private boolean manifestRequested;
+    private WorkshopTheme workshopTheme=WorkshopTheme.of(WorkshopTheme.DEFAULT_ID);
+    private final ArtTitleDraft titleDraft;
 
     public CompanionArtScreen(Screen parent, String artId, String fallbackTitle) {
+        this(parent, artId, fallbackTitle, false);
+    }
+
+    CompanionArtScreen(Screen parent, String artId, String fallbackTitle, boolean fixture) {
         super(Component.literal("Арт MapKluss"));
+        this.fixture=fixture;
         this.parent = parent;
         this.artId = artId;
         this.fallbackTitle = fallbackTitle;
+        this.titleDraft = new ArtTitleDraft(fallbackTitle);
+    }
+
+    @Override
+    public void onClose() {
+        client().gui.setScreen(parent);
     }
 
     @Override
     protected void init() {
+        fixtureLocalButtons.clear();
+        if (titleInput != null) titleDraft.edit(titleInput.getValue());
         clearWidgets();
-        CompanionUiLayout.Shell shell = artShell();
-        addNavigationControls(shell);
-        CompanionUiLayout.Rect host = actionHost(shell);
-        int panelWidth = host.width();
-        int left = host.x();
-        int gap = 4;
-        int privacyWidth = Math.max(58, (panelWidth - gap * 2) / 3);
-        int saveWidth = privacyWidth;
-        int deleteWidth = Math.max(58, panelWidth - privacyWidth - saveWidth - gap * 2);
-        int titleWidth = panelWidth;
-        int titleY = host.y() + 8;
-        titleInput = new EditBox(font, left, titleY, titleWidth, 20, CompanionI18n.text("Название арта"));
-        titleInput.setMaxLength(120);
-        setTitleInputText(manifest == null ? fallbackTitle : manifest.title());
-        addRenderableWidget(titleInput);
-        if (privacyDraft == null) {
-            privacyDraft = manifest == null || manifest.privacy() == null || manifest.privacy().isBlank()
-                ? "unlisted"
-                : manifest.privacy();
+        try { workshopTheme=WorkshopTheme.of(CompanionConfig.load(client().gameDirectory.toPath()).theme()); }
+        catch(Exception ignored) { }
+        var s=WorkshopArtLayout.at(width,height);
+        var nav=s.navigation();
+        int slot=(nav.width()-56)/5;
+        WorkshopIcon[] icons={WorkshopIcon.LIBRARY,WorkshopIcon.LENS,WorkshopIcon.SCAN,WorkshopIcon.TRACKER,WorkshopIcon.ACCOUNT};
+        String[] labels={"Библиотека","Lens","Скан","Трекер","Аккаунт"};
+        for(int i=0;i<5;i++) {
+            var destination=CompanionUiLayout.Destination.values()[i];
+            artWorkshopButton(CompanionActionInventory.navigationAction(destination),labels[i],icons[i],
+                new WorkshopLayout.Rect(nav.x()+i*slot,nav.y(),slot-4,28),()->openDestination(destination));
         }
-        int metadataY = titleY + 24;
-        int privacyX = left;
-        int saveX = left + privacyWidth + gap;
-        int deleteX = left + privacyWidth + saveWidth + gap * 2;
-        privacyButton = addRenderableWidget(MapKlussButton.builder(privacyButtonText(), button -> cyclePrivacy()).action("art.privacy")
-            .dimensions(privacyX, metadataY, privacyWidth, 20).build());
-        saveMetaButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Сохранить"), button -> saveMetadata()).action("art.save")
-            .dimensions(saveX, metadataY, saveWidth, 20).build());
-        deleteButton = addRenderableWidget(MapKlussButton.builder(deleteButtonText(), button -> deleteArt()).action("art.delete")
-            .danger()
-            .navigationOrder(1000)
-            .dimensions(deleteX, metadataY, deleteWidth, 20).build());
-
-        addPrimaryActions(left, panelWidth, gap, metadataY + 28);
-        addCompactActionControls(left, panelWidth, gap);
-        addRenderableWidget(MapKlussUi.languageButtonAt(this, shell.topBar().right() - 38, shell.topBar().y() + 9));
-        addRenderableWidget(MapKlussButton.builder(Component.literal(""), button -> client().gui.setScreen(parent)).action("global.back")
-            .tooltip(CompanionI18n.text("Назад")).dimensions(shell.topBar().x() + 4, shell.topBar().y() + 8, 24, 20).build());
+        artWorkshopButton("art.preview",CompanionI18n.english(client())?"Preview":"Превью",WorkshopIcon.LAYERS,
+            new WorkshopLayout.Rect(nav.right()-52,nav.y(),24,28),()->{ compactPreview=!compactPreview; init(); });
+        artWorkshopButton("global.back","Назад",WorkshopIcon.BACK,
+            new WorkshopLayout.Rect(nav.right()-24,nav.y(),24,28),()->client().gui.setScreen(parent));
+        var primary=s.primary();
+        int third=(primary.width()-8)/3;
+        installButton=artWorkshopButton("art.install","Установить",WorkshopIcon.INSTALL,
+            new WorkshopLayout.Rect(primary.x(),primary.y(),third,28),this::installLitematic);
+        artWorkshopButton("art.open_editor","Редактор",WorkshopIcon.EDIT,
+            new WorkshopLayout.Rect(primary.x()+third+4,primary.y(),third,28),()->openSite("/?art="+artId));
+        artWorkshopButton("art.track","Трекер",WorkshopIcon.TRACKER,
+            new WorkshopLayout.Rect(primary.x()+2*(third+4),primary.y(),primary.width()-2*(third+4),28),this::openArtTracker);
+        if(s.split() || !compactPreview) {
+            String[] groups={"Файлы","Облако","Стройка","Ещё"};
+            WorkshopIcon[] groupIcons={WorkshopIcon.FOLDER,WorkshopIcon.LIBRARY,WorkshopIcon.LAYERS,WorkshopIcon.MORE};
+            int tabWidth=(s.tabs().width()-12)/4;
+            for(int i=0;i<4;i++) {
+                final int page=i;
+                artWorkshopButton(CompanionActionInventory.artTabAction(i),groups[i],groupIcons[i],
+                    new WorkshopLayout.Rect(s.tabs().x()+i*(tabWidth+4),s.tabs().y(),tabWidth,24),
+                    ()->{ actionPage=page; deleteArmed=false; init(); }).setSelected(actionPage==i);
+            }
+            int x=s.controls().x(), y=s.controls().y(), w=s.controls().width();
+            var existingControls=new java.util.HashSet<Object>(children());
+            if(actionPage==1) {
+                titleInput=new EditBox(font,x,y,w,20,CompanionI18n.text("Название арта"));
+                titleInput.setMaxLength(120);
+                setTitleInputText(titleDraft.value());
+                addRenderableWidget(titleInput);
+                if(privacyDraft==null) privacyDraft=manifest==null?"unlisted":manifest.privacy();
+                int cell=(w-8)/3;
+                privacyButton=artWorkshopButton("art.privacy",privacyButtonText().getString(),null,new WorkshopLayout.Rect(x,y+24,cell,20),this::cyclePrivacy);
+                saveMetaButton=artWorkshopButton("art.save","Сохранить",WorkshopIcon.CHECK,new WorkshopLayout.Rect(x+cell+4,y+24,cell,20),this::saveMetadata);
+                deleteButton=artWorkshopButton("art.delete",deleteButtonText().getString(),WorkshopIcon.DELETE,new WorkshopLayout.Rect(x+2*(cell+4),y+24,w-2*(cell+4),20),this::deleteArt);
+                existingControls.addAll(children());
+                addCompactCloudActions(x,w,4,y+48);
+            } else if(actionPage==0) addCompactSchemaActions(x,w,4,y);
+            else if(actionPage==2) addCompactBuildActions(x,w,4,y);
+            else addCompactMoreActions(x,w,4,y);
+            if(s.split()) {
+                int index=0, cellWidth=(w-4)/2, top=y+(actionPage==1?48:0);
+                for(var child:children()) if(child instanceof MapKlussButton b && !existingControls.contains(child)) {
+                    b.setX(x+(index%2)*(cellWidth+4));
+                    b.setY(top+(index/2)*24);
+                    b.setWidth(cellWidth);
+                    index++;
+                }
+            }
+        }
+        for(var child:children()) if(child instanceof MapKlussButton b && !workshopButtons.contains(b)) b.workshop(workshopTheme,null);
+        workshopButtons.clear();
         updateActionButtons();
-        setFocused(null);
-        titleInput.setFocused(false);
-        refreshManifest();
+        if(fixture) {
+            for(var child:children()) if(child instanceof MapKlussButton b && !fixtureLocalButtons.contains(b)) b.active=false;
+            if(collectionsButton!=null)collectionsButton.active=true;
+        } else if(!manifestRequested) { manifestRequested=true; refreshManifest(); }
     }
+
+    private final java.util.Set<MapKlussButton> workshopButtons=new java.util.HashSet<>();
+    private final java.util.Set<MapKlussButton> fixtureLocalButtons=new java.util.HashSet<>();
+
+    private MapKlussButton artWorkshopButton(String id,String label,WorkshopIcon icon,WorkshopLayout.Rect r,Runnable callback) {
+        var builder=MapKlussButton.builder(CompanionI18n.text(label),button->callback.run()).action(id)
+            .tooltip(CompanionI18n.text(label)).dimensions(r.x(),r.y(),r.width(),r.height());
+        if("art.install".equals(id))builder.gold();
+        if("art.delete".equals(id))builder.danger();
+        var button=addRenderableWidget(builder.build().workshop(workshopTheme,icon));
+        workshopButtons.add(button);
+        if(id.startsWith("nav.") || id.startsWith("art.tab_") || id.equals("art.preview") || id.equals("global.back")) fixtureLocalButtons.add(button);
+        return button;
+    }
+
 
     private void addNavigationControls(CompanionUiLayout.Shell shell) {
         for (int i = 0; i <= CompanionUiLayout.Destination.ACCOUNT.ordinal(); i++) {
@@ -138,10 +198,10 @@ public final class CompanionArtScreen extends Screen {
     private void openDestination(CompanionUiLayout.Destination destination) {
         switch (destination) {
             case LIBRARY -> client().gui.setScreen(new CompanionLibraryScreen(parent));
-            case LENS -> client().gui.setScreen(new LensScreen(this));
-            case SCAN -> client().gui.setScreen(new ScanScreen(this));
-            case TRACKER -> client().gui.setScreen(new TrackerOpenScreen(this));
-            case ACCOUNT -> client().gui.setScreen(new CompanionAccountScreen(this));
+            case LENS -> client().gui.setScreen(new LensScreen(this, fixture));
+            case SCAN -> client().gui.setScreen(new ScanScreen(this, fixture));
+            case TRACKER -> client().gui.setScreen(new TrackerOpenScreen(this, fixture));
+            case ACCOUNT -> client().gui.setScreen(new CompanionAccountScreen(this, fixture));
             default -> { }
         }
     }
@@ -156,28 +216,6 @@ public final class CompanionArtScreen extends Screen {
             .dimensions(left + (width + gap) * 2, rowY, panelWidth - (width + gap) * 2, 22).build());
     }
 
-    private void addCompactActionControls(int left, int panelWidth, int gap) {
-        int tabsY = actionTabsY();
-        String[] groups = {"Файлы", "Облако", "Стройка", "Ещё"};
-        String[] tooltips = {"Файлы и схемы", "Облачный арт", "Инструменты постройки", "Экспорт и архивы"};
-        int tabWidth = Math.max(42, (panelWidth - gap * 3) / 4);
-        for (int i = 0; i < groups.length; i++) {
-            final int page = i;
-            addRenderableWidget(MapKlussButton.builder(CompanionI18n.text(groups[i]), button -> {
-                    actionPage = page;
-                    init();
-                }).selected(actionPage == i).tooltip(CompanionI18n.text(tooltips[i]))
-                .action(CompanionActionInventory.artTabAction(i))
-                .dimensions(left + (tabWidth + gap) * i, tabsY, i == groups.length - 1 ? panelWidth - (tabWidth + gap) * i : tabWidth, 20).build());
-        }
-        int rowY = actionTop();
-        switch (Math.max(0, Math.min(actionPage, 3))) {
-            case 0 -> addCompactSchemaActions(left, panelWidth, gap, rowY);
-            case 1 -> addCompactCloudActions(left, panelWidth, gap, rowY);
-            case 2 -> addCompactBuildActions(left, panelWidth, gap, rowY);
-            default -> addCompactMoreActions(left, panelWidth, gap, rowY);
-        }
-    }
 
     private void addCompactSchemaActions(int left, int panelWidth, int gap, int rowY) {
         int w = Math.max(46, (panelWidth - gap * 3) / 4);
@@ -229,94 +267,10 @@ public final class CompanionArtScreen extends Screen {
             .technical().dimensions(left + (w + gap) * 4, rowY, panelWidth - (w + gap) * 4, 20).build());
     }
 
-    private void addCompactLinkActions(int left, int panelWidth, int gap, int rowY) {
-        int w = Math.max(46, (panelWidth - gap * 2) / 3);
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Сайт арта"), button -> openSite("/art/" + artId)).technical().dimensions(left, rowY, w, 20).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Редактор"), button -> openSite("/?art=" + artId)).technical().dimensions(left + w + gap, rowY, w, 20).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Трекер"), button -> openArtTracker()).technical().dimensions(left + (w + gap) * 2, rowY, panelWidth - (w + gap) * 2, 20).build());
-    }
 
-    private void addCompactLibraryActions(int left, int panelWidth, int gap, int rowY) {
-        int w = Math.max(46, (panelWidth - gap * 3) / 4);
-        favoriteButton = addRenderableWidget(MapKlussButton.builder(favoriteButtonText(), button -> toggleFavorite()).selected(manifest != null && manifest.isFavorite()).dimensions(left, rowY, w, 20).build());
-        collectionsButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Коллекции"), button -> openCollections()).dimensions(left + w + gap, rowY, w, 20).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Файлы"), button -> openDownloadsFolder()).dimensions(left + (w + gap) * 2, rowY, w, 20).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Схемы"), button -> openSchematicFolder()).dimensions(left + (w + gap) * 3, rowY, panelWidth - (w + gap) * 3, 20).build());
-    }
 
-    private void addCompactExportActions(int left, int panelWidth, int gap, int rowY) {
-        int w = Math.max(46, (panelWidth - gap * 3) / 4);
-        pngButton = addRenderableWidget(MapKlussButton.builder(Component.literal("PNG"), button -> downloadFirst("preview_png")).exportAction().dimensions(left, rowY, w, 20).build());
-        materialsButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Материалы"), button -> downloadFirst("materials_txt", "materials_csv")).exportAction().dimensions(left + w + gap, rowY, w, 20).build());
-        commandsButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Команды"), button -> downloadFirst("frame_commands")).exportAction().dimensions(left + (w + gap) * 2, rowY, w, 20).build());
-        datapackButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Датапак"), button -> downloadFirst("frame_datapack")).exportAction().dimensions(left + (w + gap) * 3, rowY, panelWidth - (w + gap) * 3, 20).build());
-    }
 
-    private void addCompactArchiveActions(int left, int panelWidth, int gap, int rowY) {
-        int w = Math.max(42, (panelWidth - gap * 4) / 5);
-        autoFrameButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Для рамок"), button -> prepareAutoFrame()).gold().dimensions(left, rowY, w, 20).build());
-        suppressionButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Two-layer"), button -> openSuppression()).special().dimensions(left + w + gap, rowY, w, 20).build());
-        mapDatButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Импорт MapDat"), button -> importMapDat()).dimensions(left + (w + gap) * 2, rowY, w, 20).build());
-        downloadMapDatButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Скачать MapDat"), button -> downloadFirst("mapdat_zip")).exportAction().dimensions(left + (w + gap) * 3, rowY, w, 20).build());
-        projectButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Скачать проект"), button -> downloadFirst("project")).exportAction().dimensions(left + (w + gap) * 4, rowY, panelWidth - (w + gap) * 4, 20).build());
-    }
 
-    private void addDistributedActionControls(int left, int panelWidth) {
-        int columnWidth = (panelWidth - DISTRIBUTED_ACTION_COLUMN_GAP) / 2;
-        int right = left + columnWidth + DISTRIBUTED_ACTION_COLUMN_GAP;
-        int startY = actionTop();
-        int schemaY = startY;
-        int navigationY = startY;
-        int libraryY = schemaY + actionGroupHeight(4) + DISTRIBUTED_ACTION_ROW_GAP;
-        int exportY = navigationY + actionGroupHeight(4) + DISTRIBUTED_ACTION_ROW_GAP;
-        int archiveY = libraryY + actionGroupHeight(4) + DISTRIBUTED_ACTION_ROW_GAP;
-
-        installButton = addRenderableWidget(MapKlussButton.builder(Component.literal("+ Целиком"), button -> installLitematic()).gold()
-            .dimensions(left, schemaY, columnWidth, 20).build());
-        installTilesButton = addRenderableWidget(MapKlussButton.builder(Component.literal("+ По картам"), button -> installLitematicTiles()).gold()
-            .dimensions(left, schemaY + 24, columnWidth, 20).build());
-        removeButton = addRenderableWidget(MapKlussButton.builder(Component.literal("- Схема"), button -> removeLitematic()).danger()
-            .dimensions(left, schemaY + 48, columnWidth, 20).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Обновить"), button -> refreshManifest())
-            .dimensions(left, schemaY + 72, columnWidth, 20).build());
-
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Сайт арта"), button -> openSite("/art/" + artId))
-            .technical().dimensions(right, navigationY, columnWidth, 20).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Редактор"), button -> openSite("/?art=" + artId))
-            .technical().dimensions(right, navigationY + 24, columnWidth, 20).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Трекер"), button -> openArtTracker())
-            .technical().dimensions(right, navigationY + 48, columnWidth, 20).build());
-
-        favoriteButton = addRenderableWidget(MapKlussButton.builder(favoriteButtonText(), button -> toggleFavorite())
-            .selected(manifest != null && manifest.isFavorite())
-            .dimensions(left, libraryY, columnWidth, 20).build());
-        collectionsButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Коллекции"), button -> openCollections())
-            .dimensions(left, libraryY + 24, columnWidth, 20).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Папка файлов"), button -> openDownloadsFolder())
-            .dimensions(left, libraryY + 48, columnWidth, 20).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Папка схем"), button -> openSchematicFolder())
-            .dimensions(left, libraryY + 72, columnWidth, 20).build());
-
-        pngButton = addRenderableWidget(MapKlussButton.builder(Component.literal("PNG превью"), button -> downloadFirst("preview_png"))
-            .exportAction().dimensions(right, exportY, columnWidth, 20).build());
-        materialsButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Материалы"), button -> downloadFirst("materials_txt", "materials_csv"))
-            .exportAction().dimensions(right, exportY + 24, columnWidth, 20).build());
-        commandsButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Команды"), button -> downloadFirst("frame_commands"))
-            .exportAction().dimensions(right, exportY + 48, columnWidth, 20).build());
-        datapackButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Датапак"), button -> downloadFirst("frame_datapack"))
-            .exportAction().dimensions(right, exportY + 72, columnWidth, 20).build());
-
-        autoFrameButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Для рамок"), button -> prepareAutoFrame())
-            .gold().dimensions(left, archiveY, columnWidth, 20).build());
-        mapDatButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Импорт MapDat"), button -> importMapDat())
-            .dimensions(left, archiveY + 24, columnWidth, 20).build());
-        downloadMapDatButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Скачать MapDat"), button -> downloadFirst("mapdat_zip"))
-            .exportAction().dimensions(left, archiveY + 48, columnWidth, 20).build());
-        projectButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Скачать проект"), button -> downloadFirst("project"))
-            .exportAction().dimensions(left, archiveY + 72, columnWidth, 20).build());
-        suppressionButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Two-layer"), button -> openSuppression())
-            .special().dimensions(right, archiveY, columnWidth, 20).build());
-    }
 
     private boolean sidePreviewLayout() {
         return artShell().hasInspector();
@@ -398,7 +352,7 @@ public final class CompanionArtScreen extends Screen {
                 LitematicaStatus litematicaStatus = runtime.litematicaStatus();
                 runOnClient(() -> {
                     manifest = loaded;
-                    privacyDraft = loaded.privacy();
+                    if (!privacyDirty) privacyDraft = loaded.privacy();
                     updateFavoriteButton();
                     updateActionButtons();
                     status = refreshStatus(refresh, litematicaStatus);
@@ -420,7 +374,7 @@ public final class CompanionArtScreen extends Screen {
             runOnClient(() -> {
                 if (cached.isPresent()) {
                     manifest = cached.get().manifest();
-                    privacyDraft = manifest.privacy();
+                    if (!privacyDirty) privacyDraft = manifest.privacy();
                     updateFavoriteButton();
                     updateActionButtons();
                     status = "Показан локальный кеш.";
@@ -641,6 +595,10 @@ public final class CompanionArtScreen extends Screen {
     }
 
     private void openCollections() {
+        if(fixture) {
+            client().gui.setScreen(new CompanionArtCollectionsScreen(this,artId,fallbackTitle,null,true));
+            return;
+        }
         if (manifest == null) {
             status = "Сначала обновите арт.";
             return;
@@ -658,6 +616,7 @@ public final class CompanionArtScreen extends Screen {
             default -> "private";
         };
         privacyDraft = next;
+        privacyDirty = true;
         if (privacyButton != null) {
             privacyButton.setMessage(privacyButtonText());
         }
@@ -699,10 +658,16 @@ public final class CompanionArtScreen extends Screen {
                 LitematicaStatus litematicaStatus = runtime.litematicaStatus();
                 runOnClient(() -> {
                     manifest = updated;
-                    privacyDraft = updated.privacy();
+                    if (java.util.Objects.equals(privacyDraft, nextPrivacy)) {
+                        privacyDraft = updated.privacy();
+                        privacyDirty = false;
+                    }
                     updateFavoriteButton();
                     updateActionButtons();
                     status = metadataSaveStatus(refresh, litematicaStatus);
+                    if (titleInput != null) titleDraft.edit(titleInput.getValue());
+                    titleDraft.saved(nextTitle, updated.title());
+                    setTitleInputText(titleDraft.value());
                 });
             } catch (Exception e) {
                 if (CompanionAuthSupport.isAuthFailure(e)) {
@@ -798,49 +763,31 @@ public final class CompanionArtScreen extends Screen {
     }
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
-        String name = manifest == null ? fallbackTitle : manifest.title();
-        ScreenViewModel model = ScreenViewModel.shell(
-            CompanionUiLayout.Destination.ART,
-            CompanionI18n.translate("Библиотека"),
-            List.of(name),
-            status
-        );
-        CompanionUiLayout.Shell shell = MapKlussUi.drawShell(
-            context, font, width, height, model, true, 52
-        );
-        CompanionUiLayout.Rect host = actionHost(shell);
-        CompanionUiLayout.Rect preview = artPreview(shell);
-        context.fill(host.x(), host.y(), host.right(), host.bottom(), UiTheme.SURFACE_RAISED);
-        if (previewVisible(shell)) {
-            MapKlussUi.drawPreviewWell(context, preview.x(), preview.y(), preview.right(), preview.bottom());
+    public void extractRenderState(GuiGraphicsExtractor context,int mouseX,int mouseY,float delta) {
+        context.fill(0,0,width,height,0x88000000);
+        var s=WorkshopArtLayout.at(width,height);
+        WorkshopChrome.frame(context::fill,s.frame(),workshopTheme);
+        var nav=s.navigation();
+        context.fill(nav.x(),nav.bottom()+1,nav.right(),nav.bottom()+2,workshopTheme.color("border-subtle"));
+        WorkshopDraw.text(context,font,manifest==null?fallbackTitle:manifest.title(),
+            s.title().x()+4,s.title().y()+6,s.title().width()-8,workshopTheme.color("text-primary"));
+        if(s.split() || compactPreview) {
+            if(fixture) {
+                WorkshopDraw.image(context,net.minecraft.resources.Identifier.fromNamespaceAndPath(MapKlussCompanionClient.MOD_ID,"textures/dev/library/starry-night.png"),s.preview(),256,256);
+            } else if(manifest!=null) {
+                var preview=CompanionPreviewTextures.request(manifest);
+                if(preview.ready()) WorkshopDraw.image(context,preview.identifier(),s.preview(),preview.imageWidth(),preview.imageHeight());
+                else WorkshopDraw.text(context,font,CompanionI18n.translate(preview.loading()?"Загрузка превью":"Превью недоступно"),
+                    s.preview().x()+4,s.preview().y()+8,s.preview().width()-8,workshopTheme.color("text-secondary"));
+            } else WorkshopDraw.text(context,font,CompanionI18n.translate("Загрузка превью"),
+                s.preview().x()+4,s.preview().y()+8,s.preview().width()-8,workshopTheme.color("text-secondary"));
         }
-        if (manifest != null && previewVisible(shell)) {
-            int metaHeight = Math.min(34, Math.max(20, preview.height() / 5));
-            drawPreview(context, preview.x() + 6, preview.y() + 6, Math.max(1, preview.width() - 12), Math.max(1, preview.height() - metaHeight - 12), false);
-            int metaY = preview.bottom() - metaHeight;
-            context.fill(preview.x() + 1, metaY, preview.right() - 1, preview.bottom() - 1, UiTheme.SURFACE_RAISED);
-            MapKlussUi.drawLeft(context, font,
-                manifest.grid().wide() + "x" + manifest.grid().tall() + "  ·  " + modeLabel(manifest.mode()) + "  ·  " + privacyLabel(manifest.privacy()),
-                preview.x() + 12, metaY + 7, preview.width() - 24, MapKlussUi.WHITE);
-            if (metaHeight >= 30) {
-                MapKlussUi.drawLeft(context, font, artifactFilesLine(), preview.x() + 12, metaY + 20, preview.width() - 24, MapKlussUi.MUTED);
-            }
-        } else if (previewVisible(shell)) {
-            drawPreviewPlaceholder(context, preview.x() + 6, preview.y() + 6, Math.max(1, preview.width() - 12), Math.max(1, preview.height() - 12),
-                "Загрузка превью", "Облако готовит изображение арта", MapKlussUi.MUTED);
-        }
-        MapKlussUi.drawFieldLabel(context, font, "Название арта", host.x(), host.y() + 8, host.width());
-        super.extractRenderState(context, mouseX, mouseY, delta);
-        MapKlussUi.drawNavigation(context, shell, CompanionUiLayout.Destination.ART);
-        MapKlussUi.drawIcon(context, MapKlussIcon.BACK, shell.topBar().x() + 8, shell.topBar().y() + 10, MapKlussUi.MUTED);
+        var footer=s.footer();
+        WorkshopDraw.text(context,font,CompanionI18n.translate(status),footer.x()+4,footer.y()+6,footer.width()-8,workshopTheme.color("text-secondary"));
+        super.extractRenderState(context,mouseX,mouseY,delta);
     }
 
-    private void drawActionGroups(GuiGraphicsExtractor context, int left, int panelWidth) {
-        if (distributedActionLayout()) {
-            drawDistributedActionGroups(context, left, panelWidth);
-        }
-    }
+
 
     private void drawDistributedActionGroups(GuiGraphicsExtractor context, int left, int panelWidth) {
         int columnWidth = (panelWidth - DISTRIBUTED_ACTION_COLUMN_GAP) / 2;
@@ -858,46 +805,6 @@ public final class CompanionArtScreen extends Screen {
         MapKlussUi.drawActionGroupLabel(context, font, "Экспорт", right, columnWidth, exportY, ACTION_BUTTON_HEIGHT);
     }
 
-    private void drawPreview(GuiGraphicsExtractor context, int x, int y, int boxWidth, int boxHeight, boolean framed) {
-        if (framed) {
-            MapKlussUi.drawPreviewWell(context, x - 3, y - 3, x + boxWidth + 3, y + boxHeight + 3);
-        }
-        CompanionPreviewTextures.PreviewTexture preview = CompanionPreviewTextures.request(manifest);
-        if (preview.ready()) {
-            int imageWidth = preview.imageWidth();
-            int imageHeight = preview.imageHeight();
-            double scale = Math.min((double) boxWidth / imageWidth, (double) boxHeight / imageHeight);
-            int drawWidth = Math.max(1, (int) Math.round(imageWidth * scale));
-            int drawHeight = Math.max(1, (int) Math.round(imageHeight * scale));
-            int drawX = x + (boxWidth - drawWidth) / 2;
-            int drawY = y + (boxHeight - drawHeight) / 2;
-            context.blit(
-                RenderPipelines.GUI_TEXTURED,
-                preview.identifier(),
-                drawX,
-                drawY,
-                0.0F,
-                0.0F,
-                drawWidth,
-                drawHeight,
-                imageWidth,
-                imageHeight,
-                imageWidth,
-                imageHeight
-            );
-        } else {
-            drawPreviewPlaceholder(
-                context,
-                x,
-                y,
-                boxWidth,
-                boxHeight,
-                preview.loading() ? "Загрузка превью" : "Превью недоступно",
-                preview.loading() ? "Изображение появится здесь" : "Откройте арт на сайте или обновите файлы",
-                preview.failed() ? MapKlussUi.DIM : MapKlussUi.MUTED
-            );
-        }
-    }
 
     private void drawPreviewPlaceholder(GuiGraphicsExtractor context, int x, int y, int boxWidth, int boxHeight, String title, String detail, int color) {
         int cardWidth = Math.min(260, Math.max(120, boxWidth - 24));
@@ -927,9 +834,11 @@ public final class CompanionArtScreen extends Screen {
 
     void applyManifestUpdate(CompanionManifest updatedManifest, String newStatus) {
         manifest = updatedManifest;
-        privacyDraft = updatedManifest.privacy();
+        if (!privacyDirty) privacyDraft = updatedManifest.privacy();
         if (titleInput != null) {
-            setTitleInputText(updatedManifest.title());
+            titleDraft.edit(titleInput.getValue());
+            titleDraft.receive(updatedManifest.title());
+            setTitleInputText(titleDraft.value());
         }
         updateFavoriteButton();
         updateActionButtons();
@@ -1012,7 +921,9 @@ public final class CompanionArtScreen extends Screen {
             deleteButton.active = canEditMetadata() && manifest != null;
         }
         if (titleInput != null) {
-            String desiredTitle = manifest == null ? fallbackTitle : manifest.title();
+            titleDraft.edit(titleInput.getValue());
+            titleDraft.receive(manifest == null ? fallbackTitle : manifest.title());
+            String desiredTitle = titleDraft.value();
             if (!desiredTitle.equals(titleInput.getValue())) {
                 setTitleInputText(desiredTitle);
             }

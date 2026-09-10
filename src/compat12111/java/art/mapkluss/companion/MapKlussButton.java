@@ -14,6 +14,38 @@ import net.minecraft.text.Text;
 import java.util.function.BooleanSupplier;
 
 class MapKlussButton extends ClickableWidget {
+    private WorkshopTheme workshopTheme;
+    private WorkshopIcon workshopIcon;
+    private long workshopPressedUntil;
+
+    MapKlussButton workshop(WorkshopTheme theme, WorkshopIcon icon) {
+        workshopTheme = theme;
+        workshopIcon = icon;
+        return this;
+    }
+
+    private void renderWorkshop(DrawContext context) {
+        if (!visibleWhen.getAsBoolean()) return;
+        UiAction current = action();
+        boolean enabled = active && enabledWhen.getAsBoolean();
+        var state = new WorkshopChrome.State(enabled, isHovered(), isFocused(), System.nanoTime() < workshopPressedUntil,
+            selected, false, current == null ? actionKind(legacyTone) : current.kind());
+        var bounds = new WorkshopLayout.Rect(getX(), getY(), getWidth(), getHeight());
+        WorkshopChrome.button(context::fill, bounds, workshopTheme, state);
+        var appearance = WorkshopChrome.appearance(workshopTheme,state);
+        var font = MinecraftClient.getInstance().textRenderer;
+        String label = CompanionI18n.translate(getMessage().getString());
+        int available = getWidth()-8;
+        if (workshopIcon != null && WorkshopDraw.width(font, label) > available) label = "";
+        boolean withIcon = workshopIcon != null && (label.isEmpty() || WorkshopDraw.width(font,label)+20<=available);
+        String clipped = WorkshopDraw.clip(font,label,available-(withIcon?20:0));
+        if(clipped.isEmpty() && workshopIcon != null) withIcon=true;
+        int total=WorkshopDraw.width(font,clipped)+(withIcon?(clipped.isEmpty()?16:20):0);
+        int x=getX()+(getWidth()-total)/2+appearance.contentOffset();
+        if(withIcon) WorkshopDraw.icon(context,workshopIcon,x,getY()+(getHeight()-16)/2+appearance.contentOffset(),appearance.text());
+        if(!clipped.isEmpty()) WorkshopDraw.text(context,font,clipped,x+(withIcon?20:0),
+            getY()+(getHeight()-9)/2+appearance.contentOffset(),available,appearance.text());
+    }
     private static final int KEY_ENTER = 257;
     private static final int KEY_NUMPAD_ENTER = 335;
     private static final int KEY_SPACE = 32;
@@ -87,6 +119,7 @@ class MapKlussButton extends ClickableWidget {
 
     @Override
     protected void renderWidget(DrawContext context, int mouseX, int mouseY, float delta) {
+        if (workshopTheme != null) { renderWorkshop(context); return; }
         if (!visibleWhen.getAsBoolean()) return;
         int x = getX();
         int y = getY();
@@ -130,6 +163,7 @@ class MapKlussButton extends ClickableWidget {
     @Override
     public void onClick(Click click, boolean doubleClick) {
         if (!active || !visible || !visibleWhen.getAsBoolean() || !enabledWhen.getAsBoolean()) return;
+        workshopPressedUntil = System.nanoTime() + 120_000_000L;
         onPress.onPress(this);
     }
 
@@ -139,6 +173,7 @@ class MapKlussButton extends ClickableWidget {
         int key = keyInput.getKeycode();
         if (key != KEY_ENTER && key != KEY_NUMPAD_ENTER && key != KEY_SPACE) return false;
         playDownSound(MinecraftClient.getInstance().getSoundManager());
+        workshopPressedUntil = System.nanoTime() + 120_000_000L;
         onPress.onPress(this);
         return true;
     }

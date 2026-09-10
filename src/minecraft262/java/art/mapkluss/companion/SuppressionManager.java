@@ -49,6 +49,27 @@ public final class SuppressionManager {
         return INSTANCE;
     }
 
+    /**
+     * The files have already been installed when start() is called from the UI.
+     * Keep map-selection guidance distinct from an installation/import failure.
+     */
+    public static String startFailureMessage(Exception error) {
+        String detail = rootMessage(error);
+        if (detail.contains("Возьмите нужную карту в руку")) {
+            return "Схема установлена. В инвентаре несколько подходящих карт: возьмите нужную в основную руку и запустите её ещё раз.";
+        }
+        if (detail.contains("Подготовьте незаблокированную карту масштаба 0")) {
+            return "Схема установлена. Добавьте незаблокированную заполненную карту масштаба 0 и запустите её ещё раз.";
+        }
+        return "Не удалось начать: " + CompanionUiErrors.message("two-layer", error);
+    }
+
+    private static String rootMessage(Throwable error) {
+        Throwable current = error;
+        while (current != null && current.getCause() != null) current = current.getCause();
+        return current == null || current.getMessage() == null ? "" : current.getMessage();
+    }
+
     public synchronized void start(Minecraft client, SuppressionBundle bundle, SuppressionBundleInstaller.Installed installed) throws IOException {
         if (active()) {
             throw new IOException("Сначала остановите текущую стройку Two-layer — её прогресс не был заменён");
@@ -183,6 +204,23 @@ public final class SuppressionManager {
         return bundle != null && installed != null && stage != null;
     }
 
+    synchronized SuppressionBundle previewBundle() {
+        return active() ? bundle : null;
+    }
+
+    synchronized LiveBuildCatalogLink trackerSource() {
+        return active() ? installed.trackerSource() : null;
+    }
+
+    synchronized LiveBuildPhaseSession trackerSession(Minecraft client) {
+        if(!active()||anchor==null||client.level==null||!sameBoundWorld(client))return null;
+        int target=LiveBuildPhaseSession.targetPhase(stage,phaseIndex,bundle.parsed().plan().phases().size());
+        if(target < -1)return null;
+        var origin=worldPos(new SuppressionPlan.LocalPos(0,bundle.parsed().plan().effectiveStructureBounds().min().y(),0));
+        return new LiveBuildPhaseSession(bundle,target,worldHash,dimension,
+            new LiveBuildProgress.Position(origin.getX(),origin.getY(),origin.getZ()));
+    }
+
     public synchronized SuppressionStage stage() {
         return stage;
     }
@@ -279,7 +317,7 @@ public final class SuppressionManager {
             SuppressionSessionStore.validateForPlan(stored, parsed.plan(), restoredStage);
             bundle = new SuppressionBundle(parsed, planBytes, litematicBytes, stored.planSha256(), stored.litematicSha256(),
                 stored.artId(), stored.versionId(), stored.title(), "restored");
-            installed = new SuppressionBundleInstaller.Installed(planPath, schematicPath);
+            installed = new SuppressionBundleInstaller.Installed(planPath, schematicPath, stored.trackerSource());
             stage = restoredStage;
             anchor = stage == SuppressionStage.WAITING_ANCHOR ? null : new BlockPos(stored.anchorX(), stored.anchorY(), stored.anchorZ());
             worldHash = stage == SuppressionStage.WAITING_ANCHOR ? null : stored.worldHash();
@@ -808,7 +846,7 @@ public final class SuppressionManager {
             standPointIndex,
             dwellTicks,
             manualOverrideArmed,
-            System.currentTimeMillis()
+            System.currentTimeMillis(), installed.trackerSource()
         ));
     }
 

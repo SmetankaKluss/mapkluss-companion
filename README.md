@@ -13,7 +13,7 @@ Client-side Fabric companion for [MapKluss](https://mapkluss.art): cloud art lib
 ### Возможности
 
 - вход в аккаунт MapKluss через безопасное подтверждение устройства;
-- полностью обновлённый интерфейс с переназначаемой клавишей открытия;
+- меню Pixel Workshop, семь тёмных тем, RU/EN и переназначаемая клавиша открытия;
 - просмотр облачных артов, версий, коллекций и файлов прямо в Minecraft;
 - установка совместимых Litematic-файлов без ручного поиска загрузок;
 - Lens — клиентское отображение актуального арта на рамках стен, пола и потолка;
@@ -21,7 +21,9 @@ Client-side Fabric companion for [MapKluss](https://mapkluss.art): cloud art lib
 - отдельная кнопка распознавания и нумерации карт во всех открытых слотах;
 - локальное сохранение превью, привязок и прогресса;
 - Two-layer Builder для артов `1×1` и больших bundle-архивов с выбором части;
-- скан карт на стенах, полу и потолке, а также трекер необходимых материалов;
+- скан карт на стенах, полу и потолке, сбор ресурсов с цветным превью и трекер стройки по установленным блокам;
+- совместная стройка по приглашению и прогресс на сайте, пока мод владельца подключён;
+- запуск Lens из библиотеки с открытием той же сессии в редакторе;
 - ненавязчивое уведомление о новых версиях со ссылками на официальный сайт и Telegram.
 
 ### Поддерживаемые версии
@@ -65,7 +67,7 @@ done
 ### Features
 
 - secure MapKluss device authorization;
-- a redesigned interface with a rebindable menu key;
+- Pixel Workshop menus, seven dark themes, RU/EN and a rebindable menu key;
 - cloud arts, revisions, collections, and files inside Minecraft;
 - installation of compatible Litematic files;
 - Lens client-side previews on wall, floor, and ceiling item frames;
@@ -73,7 +75,9 @@ done
 - one-click map identification and numbering across every open inventory slot;
 - local preview, binding, and progress persistence;
 - guided Two-layer Builder for `1×1` and multi-map bundles with tile selection;
-- wall, floor, and ceiling map scanning plus material build tracking;
+- wall, floor, and ceiling map scanning, material-colour collection previews and block-scanned build tracking;
+- invite-only shared builds and website progress while the owner's mod is connected;
+- Lens creation from the Library with a link to the same session in the editor;
 - a non-intrusive new-version notice linking to the official site and Telegram.
 
 ### Requirements
@@ -84,7 +88,9 @@ Use the commands in the Russian build section to build all targets. The same mat
 
 ## Privacy and network access
 
-Companion is client-only. Account, Cloud, scan, and Lens actions communicate with MapKluss services only when their respective features are used. A bounded startup request checks the public GitHub Releases API for a newer version. Two-layer coordinates, map bindings, cached previews, and local progress remain on the player's device. See [PRIVACY.md](PRIVACY.md) for the complete English summary or [PRIVACY_RU.md](PRIVACY_RU.md) in Russian.
+Companion is client-only. Account, Cloud, scan, Lens and shared Tracker actions communicate with MapKluss services when their respective features are used. A bounded startup request checks the public GitHub Releases API for a newer version. Shared builds send the placements and observations explicitly shared by participants; website tracking sends an art preview and progress. See [PRIVACY.md](PRIVACY.md) for details or [PRIVACY_RU.md](PRIVACY_RU.md) in Russian.
+
+[Companion guide / Руководство](https://mapkluss.art/wiki/companion-guide)
 
 Anonymous usage statistics are strictly opt-in. Before consent, Companion creates no telemetry identifier and sends no telemetry request. The setting can be disabled later from Account, which also deletes the local identifier. Telemetry never includes accounts, servers, worlds, coordinates, arts, map IDs, file names, inventory contents, or error text.
 

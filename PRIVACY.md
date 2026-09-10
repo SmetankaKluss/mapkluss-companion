@@ -44,7 +44,13 @@ The service immediately replaces the random installation identifier with a salte
 
 ## Data that remains local
 
-Companion does not upload Two-layer world coordinates, anchors, demolition progress, AutoFrame bindings, local map-preview caches, or ordinary inventory contents. It does not place or break blocks automatically.
+Standalone Two-layer anchors and demolition progress, AutoFrame bindings, local map-preview caches and ordinary inventory contents remain local. Companion does not place or break blocks automatically.
+
+## Shared build tracking
+
+After explicit sharing consent, the private build service receives the selected map's coordinates, dimension, rotation, source identity and block observations. The group-local world identifier is random; the actual server address or world name is not sent. Current accepted group members can read shared build data. Source schematics are shared only through the explicit source-sharing action.
+
+The connected website tracker receives an art preview, material counts and scan progress, not world coordinates or server names. Access is limited to the owner and accepted group members. Website updates currently require the owner's mod to stay connected. These functional transfers are separate from optional anonymous statistics.
 
 ## Account deletion
 

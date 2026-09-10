@@ -16,7 +16,8 @@ public final class DeviceLoginScreen extends Screen {
         .withZone(ZoneId.systemDefault());
 
     private final Screen parent;
-    private DeviceStartResponse login;
+    private volatile DeviceStartResponse login;
+    private final DeviceLoginPollGate pollGate = new DeviceLoginPollGate();
     private AbstractWidget copyButton;
     private AbstractWidget pollButton;
     private AbstractWidget autoPollButton;
@@ -26,24 +27,52 @@ public final class DeviceLoginScreen extends Screen {
     private volatile boolean closed;
     private long loginExpiresAtMs;
     private CompanionSessionInfo sessionInfo;
+    private final boolean fixture;
+    private WorkshopTheme theme = WorkshopTheme.of(WorkshopTheme.DEFAULT_ID);
 
     public DeviceLoginScreen(Screen parent) {
+        this(parent, false);
+    }
+
+    DeviceLoginScreen(Screen parent, boolean fixture) {
         super(Component.literal("Вход MapKluss"));
         this.parent = parent;
+        this.fixture = fixture;
     }
 
     @Override
     protected void init() {
+        boolean resumePolling = closed && login != null && autoPollEnabled;
         closed = false;
-        refreshSessionInfo();
+        if (!fixture) refreshSessionInfo();
         clearWidgets();
-        CompanionUiLayout.Shell shell = loginShell();
-        CompanionUiLayout.Rect panel = loginPanel(shell);
-        addLoginControls(panel);
-        addNavigationControls(shell);
-        addRenderableWidget(MapKlussUi.languageButtonAt(this, shell.topBar().right() - 38, shell.topBar().y() + 9));
+        try { theme=WorkshopTheme.of(CompanionConfig.load(client().gameDirectory.toPath()).theme()); }
+        catch(Exception ignored) { }
+        var shell=WorkshopLayout.account(width,height);
+        var nav=shell.navigation();
+        loginButton("global.back","Назад",WorkshopIcon.BACK,new WorkshopLayout.Rect(nav.right()-24,nav.y(),24,28),true,this::onClose);
+        loginButton("account.theme",CompanionI18n.english(client()) ? "Appearance" : "Оформление",WorkshopIcon.LAYERS,new WorkshopLayout.Rect(nav.right()-52,nav.y(),24,28),true,()->client().gui.setScreen(new WorkshopAppearanceScreen(this)));
+        loginButton("global.language",CompanionI18n.toggleLabel(client()),null,new WorkshopLayout.Rect(nav.right()-96,nav.y(),40,28),true,()-> {
+            try { CompanionI18n.toggle(client()); init(); } catch(Exception e) { status="Не удалось сохранить выбор."; }
+        });
+        int w=nav.width(),x=nav.x(),gap=4,third=(w-gap*2)/3,half=(w-gap)/2;
+        int row2=shell.footer().y()-28,row1=row2-28;
+        loginButton("account.login_start","Получить код",WorkshopIcon.ACCOUNT,new WorkshopLayout.Rect(x,row1,third,24),!fixture,this::startLogin);
+        autoPollButton=loginButton("account.login_auto_poll",autoPollButtonText().getString(),WorkshopIcon.REFRESH,new WorkshopLayout.Rect(x+third+gap,row1,third,24),true,this::toggleAutoPoll);
+        pollButton=loginButton("account.login_poll","Проверить",WorkshopIcon.CHECK,new WorkshopLayout.Rect(x+2*(third+gap),row1,w-2*(third+gap),24),!fixture,this::pollLogin);
+        copyButton=loginButton("account.copy_code","Копировать код",WorkshopIcon.LAYERS,new WorkshopLayout.Rect(x,row2,half,24),!fixture,this::copyUserCode);
+        loginButton("account.open_site","Открыть сайт",WorkshopIcon.LINK,new WorkshopLayout.Rect(x+half+gap,row2,w-half-gap,24),!fixture,this::openDevicePage);
         updateButtons();
+        if (resumePolling && !fixture) startAutoPollLoop();
     }
+
+    private MapKlussButton loginButton(String id,String label,WorkshopIcon icon,WorkshopLayout.Rect r,boolean enabled,Runnable callback) {
+        var builder=MapKlussButton.builder(CompanionI18n.text(label),button->callback.run()).action(id)
+            .enabledWhen(()->enabled).tooltip(CompanionI18n.text(label)).dimensions(r.x(),r.y(),r.width(),r.height());
+        if("account.login_start".equals(id))builder.gold();
+        return addRenderableWidget(builder.build().workshop(theme,icon));
+    }
+
 
     private void addLoginControls(CompanionUiLayout.Rect panel) {
         int gap = 6;
@@ -74,6 +103,9 @@ public final class DeviceLoginScreen extends Screen {
 
     private void startLogin() {
         final int generation = ++pollLoopGeneration;
+        login = null;
+        loginExpiresAtMs = 0;
+        updateButtons();
         status = "Создаю код входа...";
         MapKlussCompanionClient.LOGGER.info("Device login start requested.");
         CompletableFuture.runAsync(() -> {
@@ -120,7 +152,7 @@ public final class DeviceLoginScreen extends Screen {
         if (autoPollEnabled && login != null) {
             status = "Автопроверка включена.";
             startAutoPollLoop();
-        } else if (!autoPollEnabled) {
+        } else if (!autoPollEnabled && login != null) {
             pollLoopGeneration++;
             status = "Автопроверка выключена.";
         }
@@ -143,7 +175,9 @@ public final class DeviceLoginScreen extends Screen {
                     return;
                 }
                 try {
-                    Thread.sleep(Math.max(1, login.interval()) * 1000L);
+                    DeviceStartResponse scheduled = login;
+                    if (scheduled == null || generation != pollLoopGeneration) return;
+                    Thread.sleep(Math.max(1, scheduled.interval()) * 1000L);
                 } catch (InterruptedException ignored) {
                     Thread.currentThread().interrupt();
                     return;
@@ -163,12 +197,24 @@ public final class DeviceLoginScreen extends Screen {
     }
 
     private boolean pollLoginOnce(int generation) throws Exception {
-        if (!isCurrent(generation) || login == null) return true;
+        if (!pollGate.acquire(generation)) return pollGate.completed(generation);
+        boolean terminal = false;
+        try {
+            terminal = pollLoginExclusively(generation);
+            return terminal;
+        } finally {
+            pollGate.release(generation, terminal);
+        }
+    }
+
+    private boolean pollLoginExclusively(int generation) throws Exception {
+        DeviceStartResponse attempt = login;
+        if (!isCurrent(generation) || attempt == null) return true;
         CompanionRuntime runtime = CompanionRuntime.create(client());
-        DevicePollResponse response = runtime.apiClient().pollDeviceLogin(login.deviceCode());
+        DevicePollResponse response = runtime.apiClient().pollDeviceLogin(attempt.deviceCode());
         if (!isCurrent(generation)) return true;
         if ("approved".equals(response.status()) && response.accessToken() != null) {
-            MapKlussCompanionClient.LOGGER.info("Device login approved for user {}.", response.userId());
+            MapKlussCompanionClient.LOGGER.info("Device login approved.");
             runOnClient(generation, () -> {
                 try {
                     runtime.saveSession(response.accessToken(), response.userId());
@@ -223,39 +269,6 @@ public final class DeviceLoginScreen extends Screen {
         status = "Код скопирован";
     }
 
-    @Override
-    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
-        CompanionUiLayout.Shell shell = MapKlussUi.drawShell(
-            context, font, width, height,
-            ScreenViewModel.shell(CompanionUiLayout.Destination.ACCOUNT, CompanionI18n.translate("Аккаунт"),
-                java.util.List.of(CompanionI18n.translate("Вход")), status), false
-        );
-        CompanionUiLayout.Rect panel = loginPanel(shell);
-        context.fill(panel.x(), panel.y(), panel.right(), panel.bottom(), UiTheme.SURFACE_RAISED);
-        context.fill(panel.x(), panel.y(), panel.x() + 3, panel.bottom(), login == null ? UiTheme.AMBER : UiTheme.LIME);
-        int x = panel.x() + 14;
-        int textWidth = Math.max(1, panel.width() - 28);
-        MapKlussUi.drawLeft(context, font, login == null ? "Вход в MapKluss" : "Подтвердите вход на сайте", x, panel.y() + 13, textWidth, MapKlussUi.WHITE);
-        if (panel.height() >= 180) {
-            MapKlussUi.drawLeft(context, font, sessionSummary(), x, panel.y() + 31, textWidth, sessionColor());
-        }
-        if (login != null) {
-            int codeY = panel.height() >= 180 ? panel.y() + 62 : panel.y() + 31;
-            context.fill(x, codeY - 8, panel.right() - 14, codeY + 28, UiTheme.SURFACE_INPUT);
-            MapKlussUi.drawCenteredIn(context, font, login.userCode(), panel.x() + panel.width() / 2, codeY, textWidth, MapKlussUi.ACCENT);
-            if (panel.height() >= 180) {
-                String timing = CompanionI18n.english(client())
-                    ? "Expires in " + remainingSeconds() + "s / checks every " + login.interval() + "s / " + (autoPollEnabled ? "automatically" : "manually")
-                    : "Истекает через " + remainingSeconds() + "с / проверка каждые " + login.interval() + "с / " + (autoPollEnabled ? "автоматически" : "вручную");
-                MapKlussUi.drawCenteredIn(context, font, timing, panel.x() + panel.width() / 2, codeY + 16, textWidth, MapKlussUi.MUTED);
-            }
-        } else {
-            int emptyY = panel.height() >= 180 ? panel.y() + 70 : panel.y() + 38;
-            MapKlussUi.drawCenteredIn(context, font, "Получите код и подтвердите его на mapkluss.art", panel.x() + panel.width() / 2, emptyY, textWidth, MapKlussUi.MUTED);
-        }
-        super.extractRenderState(context, mouseX, mouseY, delta);
-        MapKlussUi.drawNavigation(context, shell, CompanionUiLayout.Destination.ACCOUNT);
-    }
 
     private void updateButtons() {
         if (copyButton != null) copyButton.active = login != null && login.userCode() != null && !login.userCode().isBlank();
@@ -266,6 +279,24 @@ public final class DeviceLoginScreen extends Screen {
                 mapKlussButton.setSelected(autoPollEnabled);
             }
         }
+    }
+
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor context,int mouseX,int mouseY,float delta) {
+        context.fill(0,0,width,height,0x88000000);
+        var s=WorkshopLayout.account(width,height);
+        WorkshopChrome.frame(context::fill,s.frame(),theme);
+        var nav=s.navigation();
+        WorkshopDraw.text(context,font,CompanionI18n.translate("Вход MapKluss"),nav.x()+4,nav.y()+10,nav.width()-104,theme.color("text-primary"));
+        context.fill(nav.x(),nav.bottom()+1,nav.right(),nav.bottom()+2,theme.color("border-subtle"));
+        var code=s.tabs();
+        WorkshopDraw.text(context,font,CompanionI18n.translate(login==null ? "Получить код" : "Подтвердите вход на сайте"),code.x()+4,code.y()+8,code.width()-8,theme.color("text-secondary"));
+        int y=s.preview().y()+8;
+        WorkshopDraw.text(context,font,login==null ? "---- ----" : login.userCode(),nav.x()+8,y,nav.width()-16,theme.color("accent"));
+        if(login!=null)WorkshopDraw.text(context,font,(CompanionI18n.english(client()) ? "Expires in " : "Истекает через ")+remainingSeconds()+" s",nav.x()+8,y+18,nav.width()-16,theme.color("text-secondary"));
+        var footer=s.footer();
+        WorkshopDraw.text(context,font,CompanionI18n.translate(status),footer.x()+4,footer.y()+6,footer.width()-8,theme.color("text-secondary"));
+        super.extractRenderState(context,mouseX,mouseY,delta);
     }
 
     private Component autoPollButtonText() {
@@ -399,6 +430,6 @@ public final class DeviceLoginScreen extends Screen {
     public void onClose() {
         closed = true;
         pollLoopGeneration++;
-        super.onClose();
+        client().gui.setScreen(parent);
     }
 }

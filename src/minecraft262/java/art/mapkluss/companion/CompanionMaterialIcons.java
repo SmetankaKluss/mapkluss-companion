@@ -15,6 +15,23 @@ final class CompanionMaterialIcons {
     private CompanionMaterialIcons() {
     }
 
+    private static final ConcurrentMap<String,Integer> MAP_COLOURS=new ConcurrentHashMap<>();
+    static java.util.Map<String,Integer> mapColours(BuildSessionState session) {
+        var result=new java.util.HashMap<String,Integer>();
+        if(session.materials()!=null)for(var material:session.materials()) {
+            int colour=MAP_COLOURS.computeIfAbsent(material.nbtName(),name->{
+                var id=Identifier.tryParse(normalize(name));
+                if(id==null)return -1;
+                var block=BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
+                if(block==null)return -1;
+                return block.defaultBlockState().getMapColor(net.minecraft.world.level.EmptyBlockGetter.INSTANCE,
+                    net.minecraft.core.BlockPos.ZERO).col;
+            });
+            if(colour>=0)result.put(material.nbtName(),colour);
+        }
+        return result;
+    }
+
     static ItemStack stackFor(BuildSessionMaterial material) {
         if (material == null) return ItemStack.EMPTY;
         return CACHE.computeIfAbsent(material.nbtName(), CompanionMaterialIcons::createStack);

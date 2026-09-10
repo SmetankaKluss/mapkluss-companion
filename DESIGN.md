@@ -1,135 +1,101 @@
-# MapKluss Companion UI 0.13
+# MapKluss Companion 0.14: Pixel Workshop
 
-This document is the source of truth for the Companion interface. Production screens, UI Lab fixtures, tests, and resource tokens must follow it.
+## Visual Contract
 
-## Product Character
+The interface is an in-game pixel workshop, not a website. Approved composition:
+a compact centered window, top navigation, vertical art list on the left, large
+complete preview on the right, title/favorite and one action row below it.
+Pixel Workshop supplies the stepped frame, restrained key-like bevels and raster
+typography. This replaces the previous console/left-navigation-rail design.
 
-MapKluss Companion is a focused tool for finding, inspecting, placing, and building map art. The interface should feel like a quiet console laid over the Minecraft world: image-first, direct, readable, and restrained. It is not a Minecraft-themed website and not a decorative dashboard.
+Actual geometry and rendered captures are the acceptance source. Generated
+concepts guide composition and appearance, not invented actions, exact font
+files or permission to remove features. No background blur or decorative screws.
 
-## Visual Direction
+## Themes
 
-- Keep the world visible under one soft neutral scrim. Do not blur it.
-- Use near-black and graphite surfaces with one clear hierarchy.
-- Use MapKluss lime for selection and the primary action only.
-- Use cyan for live/technical state, amber for warnings, and red for destructive actions or errors.
-- Do not use brass, amethyst, orange export categories, bevels, fake screws, inner shadows, glow, or permanent colored outlines.
-- Preview media is the dominant visual element. Show the complete image, preserve aspect ratio, and use nearest-neighbor sampling.
-- Corners are square or lightly rounded (2-4 px). Dividers are one pixel.
+Only these seven dark themes exist: Classic, Deep Ocean, Ember Forge, Amethyst,
+Acid Grove, Cobalt Pulse and Midnight. Default: Amethyst. All are selectable in
+Account; language and theme persist independently. No runtime website request.
+Semantic colors are in ui/workshop-themes.json, copied from the editor theme
+tokens. Never tint artworks, block textures or Minecraft map colors.
 
-## Color Tokens
+Amethyst anchors: background #100e18, primary #191524, secondary #231c33,
+raised #2d2440, text #ebe3f7, secondary text #c1b4d8, accent #bc94ff.
+Other themes change colors, not dimensions or component positions.
+Focus uses its own inset outline. Selected tabs have a two-pixel underline.
+Warnings/errors also have an icon or readable status, never color alone.
 
-| Token | Value | Use |
-| --- | --- | --- |
-| `canvas` | `#090B0E` | Deepest app background |
-| `surface` | `#11151A` | Shell and primary panels |
-| `surface_raised` | `#181D23` | Selected rows and inspectors |
-| `surface_input` | `#07090C` | Inputs and preview wells |
-| `border` | `#303842` | Quiet dividers and boundaries |
-| `border_strong` | `#536171` | Focus-independent strong boundary |
-| `text` | `#F2F5F7` | Primary text |
-| `text_muted` | `#A8B2BD` | Secondary text |
-| `text_dim` | `#68737F` | Disabled and tertiary text |
-| `lime` | `#64F58D` | Selection and primary action |
-| `cyan` | `#51D7F0` | Sync, Lens, and technical state |
-| `amber` | `#F4C75B` | Warning and attention |
-| `red` | `#FF6673` | Error and destructive action |
+## Raster Resources And Type
 
-## Typography
+Use MapKluss Workshop Bitmap: a pinned 8-pixel-grid bitmap conversion of the
+bundled OFL source, with ASCII, Russian including Yo, and common punctuation.
+The converted font has its own name; keep the original notice and OFL license.
+Vanilla is the fallback for other symbols. Use the styled text object for BOTH
+measurement and drawing. No smoothing, fractional text scales or web typography.
+Never shrink long labels: shorten localized labels or clip with a full tooltip.
+Body text is native scale; headings may use an integer scale where space permits.
 
-- Primary typeface: bundled Inter, with Cyrillic and Latin coverage. Use its neutral shapes to keep dense controls and metadata readable at every GUI scale.
-- Vanilla font is the fallback for unsupported glyphs.
-- Titles use semibold. Body, labels, and metadata use regular.
-- Do not use all-caps for sentences. Section labels may use concise uppercase only when space is tight.
-- One line has one purpose. Clip with an ellipsis and provide a tooltip when the full value matters.
+The original icon atlas contains twenty 16x16 masks. Use resource icons rather
+than Unicode approximations. Frame/button masks have fixed stepped corners.
+Shared WorkshopChrome defines the semantic integer-grid frame/button painter;
+adapters must not invent different colors, geometry or states.
+Generated resources are reproducible using the scripts, not runtime generation.
 
-## Spacing And Metrics
+## Layout
 
-- Base spacing unit: 4 px.
-- Page inset: 12 px compact, 16 px medium, 20 px wide.
-- Control height: 20 px compact, 24 px standard.
-- Navigation rail: 56 px wide; medium icon rail: 44 px; compact bottom bar: 34 px high.
-- Top bar: 38 px wide/medium, 32 px compact.
-- Preview/inspector gap: 12 px.
-- Minimum pointer target: 20 x 20 px in Minecraft logical pixels.
+All values are Minecraft logical pixels, not physical screenshot pixels.
+Reference viewport: 960x540. Window: 610x432 centered. Border inset: 6.
+Navigation: 28 high; Library tabs: 24; gaps: 4; footer: 20.
+Left list occupies 30.8 percent of inner width, right side gets the remainder.
+Metadata: 32 high; main actions: 28. Preview uses remaining height and contains
+the complete image with nearest sampling. It never crops a portrait or wide art.
 
-## Responsive Modes
-
-### Wide
-
-- At least 760 logical pixels wide and 420 high.
-- Persistent 56 px left navigation, top bar, content, and optional inspector.
-- Library uses a preview strip/grid plus a large selected-art stage.
-- Art uses a dominant preview and one contextual action inspector.
-
-### Medium
-
-- At least 500 logical pixels wide and 300 high.
-- 44 px icon navigation.
-- Inspector becomes an in-content tab or drawer.
-
-### Compact
-
-- Smaller viewports or GUI scale 3/4/Auto.
-- Bottom navigation and one content region at a time.
-- No squeezed multi-column button grids.
-
-## Navigation
-
-Top-level destinations are Library, Lens, Scan, Tracker, and Account. Collections is a Library tab. Two-layer starts from an art and becomes a resumable task. Update availability appears as a badge in Account and the global status area.
+At smaller viewports use the available width with 8-pixel exterior margins.
+Two columns require at least 548 inner pixels and 240 body pixels.
+Otherwise list and selected art become separate views with explicit Back.
+Navigation changes to icons with tooltips before labels collide.
+Never hide functionality to fit a size. Use pagination/scroll in data regions;
+global actions and status remain outside those regions.
 
 ## Components
 
-### Buttons
+Buttons use a one-pixel highlight above/left and a dark lower/right edge.
+Hover raises the surface; focus is a distinct inset ring. Press reverses edge
+direction and offsets content by one pixel without resizing the hit target.
+Selected is independent of hover/focus. Disabled controls cannot activate or
+display a pressed offset. Primary uses accent fill and on-accent text.
+Loading retains the same bounds and a visible busy indication.
+Every actionable icon has a localized tooltip and narration.
 
-- Default: quiet graphite fill, no permanent accent outline.
-- Hover: raised graphite fill and brighter text.
-- Focus: one-pixel cyan focus ring outside the control.
-- Pressed: darker surface and one-pixel inward content shift.
-- Selected: lime leading indicator or underline, not a full neon box.
-- Primary: lime fill with dark text; use once per decision group.
-- Technical: cyan text/indicator on graphite.
-- Warning: amber text/indicator.
-- Danger: red text/indicator; confirmation remains explicit.
-- Disabled: dim text and low-contrast surface. It must never resemble an active control.
+## Screens And Functions
 
-### Tabs And Segmented Controls
+Library: My Arts, Favorites, Recent, Collections, search/refresh, left selection,
+large right preview, Install, Lens, Tracker, Two-layer, Editor and More.
+Selection is not the same as opening Art details.
+Art: preserve Files/Cloud/Build operations and confirmations through groups/More.
+Lens: selected image/status, sessions and placements, join, personal/group only.
+Scan: mode selector, corners, preview/result/history, compact action footer.
+Tracker: continuous material table, manual counts, step, undo and session history.
+Account: login, theme, language, sync, updates, telemetry opt-in, Details, logout.
+Two-layer: source/part selection, current stage/action, progress and explicit Stop.
+Preserve K/O/J, frame interaction, map previews and existing HUDs. No invented
+HUD customization from concept art. Explicit singleplayer MAP.DAT import remains;
+automatic construction/demolition and storage sorting remain excluded.
 
-- Tabs share one quiet track. Selected tab has a lime underline or leading edge.
-- Segmented controls are for mutually exclusive modes such as Scan Hand/Frame/Wall/Corners.
+## Implementation And Acceptance
 
-### Art Tiles
+Keep existing services, callbacks, ownership, cache and request-epoch protections.
+New visual components live in shared main code; compatibility layers translate
+draw calls and input. Old visuals remain only until replacement functionality
+is verified, then are removed. This document describes the target, not proof
+that every old screen has already migrated.
 
-- Thumbnail first, then title and compact metadata.
-- Selecting a tile updates the large stage. It does not expose five equal row actions.
-- Card actions are contextual: open on activation; favorite and more remain secondary.
-
-### Status
-
-- Status sits in the top bar or the relevant workflow, never between a title and its controls.
-- Loading, error, warning, and success must include text or an icon, not color alone.
-
-## Screen Rules
-
-- Library: My Arts, Favorites, Recent, Collections; search, sort, refresh; large selected art; thumbnail strip/grid.
-- Art: large complete preview; primary Install/Update, Open editor, Track build; Files/Cloud/Build tabs and More for rare actions.
-- Lens: connection, revision, viewers, and live image first; code, placements, and group access below; no public mode.
-- Scan: segmented mode control, preview/result next to errors, one bottom action bar.
-- Tracker: one scrolling table with sticky header, icons, editable counts, and progress.
-- Account: login/device code, Cloud and sync status, language, update, cloud site, logout; identifiers under Details.
-- Two-layer: focused workflow, current part and stage first, HUD settings second.
-
-## Interaction And Accessibility
-
-- Every component implements default, hover, keyboard focus, pressed, selected, disabled, loading, warning, and error where applicable.
-- Tab and Shift+Tab follow visual reading order. Enter and Space activate focused controls. Escape returns or closes.
-- Do not communicate meaning through color alone. Pair state colors with a label, icon, or shape.
-- Tooltip placement is clamped to viewport bounds.
-- No text or controls may overlap at 320x240, 480x270, 640x360, 960x540, or 1280x720 logical pixels.
-
-## Development Rules
-
-- `src/main` owns theme tokens, action IDs, view models, and layout geometry.
-- Minecraft source sets render the shared model and translate input only.
-- UI Lab uses the production component tree and renderer.
-- UI Lab, fixtures, F8, and development watchers are excluded from production JARs.
-- Before removing a legacy screen, action reachability tests must prove that all registered action IDs exist in the new hierarchy.
+Use the ordinary production menu with isolated fixtures/HotSwap, never the F8
+Lab menu as visual truth. Compare actual Minecraft captures against references.
+Test mounted widgets, callback destinations and enabled states, not just IDs.
+Cover RU/EN, seven themes, GUI scales 2/3/4/Auto, long/empty/loading/error data,
+keyboard focus, clipped tooltips, no overlaps and no missing actions.
+Build all four targets sequentially. Dev fixtures, Control Desk and watchers
+must not be present in production JARs. Owner Library review precedes the other
+screen migrations. Publishing requires separate authorization.

@@ -74,5 +74,18 @@ public final class SuppressionBundleInstaller {
         return sha == null || sha.length() < 12 ? "bundle" : sha.substring(0, 12);
     }
 
-    public record Installed(Path planPath, Path schematicPath) { }
+    public static Installed installCatalog(Path runDir, SuppressionBundleCatalog catalog, int tile) throws IOException {
+        if (tile < 0 || tile >= catalog.tiles().size()) throw new IOException("Invalid selected tile");
+        try (var cached = LiveBuildSourceCache.forRunDir(runDir).importCatalog(catalog)) {
+            var bundle = catalog.tiles().get(tile).bundle();
+            var link = new LiveBuildCatalogLink(cached.reference().sha256(), tile);
+            link.validate(cached, bundle);
+            var installed = install(runDir, bundle);
+            return new Installed(installed.planPath(), installed.schematicPath(), link);
+        }
+    }
+
+    public record Installed(Path planPath, Path schematicPath, LiveBuildCatalogLink trackerSource) {
+        public Installed(Path planPath, Path schematicPath) { this(planPath, schematicPath, null); }
+    }
 }

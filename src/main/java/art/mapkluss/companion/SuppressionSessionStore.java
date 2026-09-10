@@ -101,6 +101,16 @@ public final class SuppressionSessionStore {
         int standPointIndex,
         int dwellTicks,
         boolean manualOverrideArmed,
-        long updatedAt
-    ) { }
+        long updatedAt,
+        LiveBuildCatalogLink trackerSource
+    ) {
+        public StoredSession(int formatVersion, String planPath, String schematicPath, String planSha256,
+            String litematicSha256, String artId, String versionId, String title, SuppressionStage stage,
+            int anchorX, int anchorY, int anchorZ, String worldHash, String dimension, int mapId,
+            int phaseIndex, int standPointIndex, int dwellTicks, boolean manualOverrideArmed, long updatedAt) {
+            this(formatVersion, planPath, schematicPath, planSha256, litematicSha256, artId, versionId,
+                title, stage, anchorX, anchorY, anchorZ, worldHash, dimension, mapId, phaseIndex,
+                standPointIndex, dwellTicks, manualOverrideArmed, updatedAt, null);
+        }
+    }
 }

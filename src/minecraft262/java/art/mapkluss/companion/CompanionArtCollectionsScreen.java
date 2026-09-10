@@ -11,7 +11,20 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
-public final class CompanionArtCollectionsScreen extends Screen {
+public final class CompanionArtCollectionsScreen extends WorkshopTrackerScreen {
+    @Override
+    protected boolean submitFocusedInput() {
+        if (searchInput != null && searchInput.isFocused()) {
+            applySearch();
+            return true;
+        }
+        if (createInput != null && createInput.isFocused()) {
+            if (!fixture) createCollection();
+            return true;
+        }
+        return false;
+    }
+
     private static final int ROWS = 7;
     private static final int ROW_HEIGHT = 46;
     private static final int BOTTOM_RESERVED = 64;
@@ -32,60 +45,117 @@ public final class CompanionArtCollectionsScreen extends Screen {
     private int page;
     private AbstractWidget pageButton;
 
-    public CompanionArtCollectionsScreen(CompanionArtScreen parent, String artId, String fallbackTitle, CompanionManifest manifest) {
+    public CompanionArtCollectionsScreen(CompanionArtScreen parent, String artId, String fallbackTitle, CompanionManifest manifest) { this(parent, artId, fallbackTitle, manifest,false); }
+
+    CompanionArtCollectionsScreen(CompanionArtScreen parent, String artId, String fallbackTitle, CompanionManifest manifest,boolean fixture) {
         super(Component.literal("Коллекции арта"));
         this.parent = parent;
         this.artId = artId;
         this.fallbackTitle = fallbackTitle;
         this.manifest = manifest;
+
+        this.fixture=fixture;
     }
+
+    private WorkshopTheme workshopTheme=WorkshopTheme.of(WorkshopTheme.DEFAULT_ID);
+    private final boolean fixture;
+    private boolean fixtureApplied;
+    private boolean requested;
+
+    @Override
+    public void onClose() {
+
+        client().gui.setScreen(parent);
+    }
+
+    void applyDevelopmentData(List<CompanionCollection> data,String nextStatus) {
+        if(!fixture)return;
+        collections.clear();
+        collections.addAll(data);
+        status=nextStatus;
+    }
+
+    void applyDevelopmentManifest(CompanionManifest value) {
+        if(fixture)manifest=value;
+    }
+
+    private void prepareFixture() {
+        if(!fixture || fixtureApplied)return;
+        fixtureApplied=true;
+        try {
+            Class.forName("art.mapkluss.companion.CompanionLibraryDevFixture")
+                .getMethod("applyCollections",Object.class).invoke(null,this);
+        } catch(ReflectiveOperationException ignored) { }
+    }
+
+    private MapKlussButton collectionButton(String id,String label,WorkshopIcon icon,WorkshopLayout.Rect r,boolean local,Runnable action) {
+        var b=MapKlussButton.builder(CompanionI18n.text(label),button->{if(!fixture||local)action.run();}).action(id)
+            .enabledWhen(()->!fixture||local).tooltip(CompanionI18n.text(label)).dimensions(r.x(),r.y(),r.width(),r.height());
+        if(id.equals("collections.delete")||id.equals("collections.remove_art"))b.danger();
+        if(id.equals("collections.create")||id.equals("collections.rename"))b.gold();
+        return addRenderableWidget(b.build().workshop(workshopTheme,icon));
+    }
+
+    private void workshopNavigation() {
+        try {workshopTheme=WorkshopTheme.of(CompanionConfig.load(client().gameDirectory.toPath()).theme());}
+        catch(Exception ignored) {}
+        var s=WorkshopCollectionLayout.at(width,height);
+        var nav=s.navigation();
+        int slot=(nav.width()-28)/5;
+        WorkshopIcon[] icons={WorkshopIcon.LIBRARY,WorkshopIcon.LENS,WorkshopIcon.SCAN,WorkshopIcon.TRACKER,WorkshopIcon.ACCOUNT};
+        String[] labels={"Библиотека","Lens","Скан","Трекер","Аккаунт"};
+        for(int i=0;i<5;i++) {
+            var d=CompanionUiLayout.Destination.values()[i];
+            collectionButton(CompanionActionInventory.navigationAction(d),labels[i],icons[i],
+                new WorkshopLayout.Rect(nav.x()+i*slot,nav.y(),slot-4,28),true,()->openDestination(d));
+        }
+        collectionButton("global.back","Назад",WorkshopIcon.BACK,new WorkshopLayout.Rect(nav.right()-24,nav.y(),24,28),true,this::onClose);
+        collectionButton("global.language",CompanionI18n.toggleLabel(client()),null,
+            new WorkshopLayout.Rect(s.heading().right()-40,s.heading().y(),40,20),true,()->{
+                try {CompanionI18n.toggle(client());init();}catch(Exception e){status="Не удалось сохранить выбор.";}
+            });
+    }
+
+    private void workshopSearch() {
+        var r=WorkshopCollectionLayout.at(width,height).search();
+        searchInput=new EditBox(font,r.x(),r.y(),r.width()-56,24,CompanionI18n.text("Поиск"));
+        searchInput.setHint(CompanionI18n.text("Поиск"));
+        searchInput.setMaxLength(80);
+        searchInput.setValue(searchQuery);
+        searchInput.setResponder(value->searchQuery=value);
+        addRenderableWidget(searchInput);
+        collectionButton("collections.search","Найти",WorkshopIcon.SEARCH,new WorkshopLayout.Rect(r.right()-52,r.y(),24,24),true,this::applySearch);
+        collectionButton("collections.search_clear","Сброс",WorkshopIcon.CLOSE,new WorkshopLayout.Rect(r.right()-24,r.y(),24,24),true,this::clearSearch);
+    }
+
+    private void rebuildControls() {
+        workshopNavigation();
+        workshopSearch();
+        var s=WorkshopCollectionLayout.at(width,height);
+        var r=s.manage();
+        createInput=new EditBox(font,r.x(),r.y(),r.width()-84,24,CompanionI18n.text("Новая коллекция"));
+        createInput.setHint(CompanionI18n.text("Новая коллекция"));
+        createInput.setMaxLength(80);
+        createInput.setValue(createDraft);
+        createInput.setResponder(value->createDraft=value);
+        addRenderableWidget(createInput);
+        collectionButton("collections.create","Создать",WorkshopIcon.CHECK,new WorkshopLayout.Rect(r.right()-80,r.y(),80,24),false,this::createCollection);
+        collectionButton("collections.refresh","Обновить",WorkshopIcon.REFRESH,new WorkshopLayout.Rect(s.footer().x(),s.footer().y(),24,20),false,this::loadCollections);
+        pageButton=collectionButton("collections.page_next",pageButtonText().getString(),null,new WorkshopLayout.Rect(s.footer().right()-88,s.footer().y(),88,20),true,this::nextPage);
+
+        page=clampPage(page);
+        updatePageButton();
+        focusCreateInput();
+    }
+
 
     @Override
     protected void init() {
+        prepareFixture();
         clearWidgets();
-        CompanionUiLayout.Shell shell = collectionsShell();
-        CompanionUiLayout.Rect work = collectionsWork(shell);
-        int panelWidth = work.width();
-        int left = work.x();
-        int gap = 6;
-        int createButtonWidth = 112;
-        int createWidth = Math.max(110, panelWidth - createButtonWidth - gap);
-        createInput = new EditBox(font, left, work.y(), createWidth, 22, CompanionI18n.text("Название коллекции"));
-        createInput.setHint(Component.literal("Новая коллекция"));
-        createInput.setMaxLength(80);
-        createInput.setValue(createDraft);
-        createInput.setResponder(value -> createDraft = value);
-        addRenderableWidget(createInput);
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Создать +"), button -> createCollection()).action("collections.create")
-            .selected(true).dimensions(left + createWidth + gap, work.y(), createButtonWidth, 22).build());
-
-        int searchButtonWidth = 58;
-        int searchWidth = Math.max(80, panelWidth - searchButtonWidth * 2 - gap * 2);
-        searchInput = new EditBox(font, left, work.y() + 30, searchWidth, 22, CompanionI18n.text("Поиск коллекций"));
-        searchInput.setMaxLength(80);
-        searchInput.setValue(searchQuery);
-        searchInput.setResponder(value -> searchQuery = value);
-        addRenderableWidget(searchInput);
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Найти"), button -> applySearch()).action("collections.search")
-            .dimensions(left + searchWidth + gap, work.y() + 30, searchButtonWidth, 22).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Сброс"), button -> clearSearch()).action("collections.search_clear")
-            .dimensions(left + searchWidth + searchButtonWidth + gap * 2, work.y() + 30, searchButtonWidth, 22).build());
-
-        int bottomButtonWidth = Math.max(48, (panelWidth - gap) / 2);
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Обновить"), button -> loadCollections())
-            .action("collections.refresh")
-            .technical().dimensions(left, work.bottom() - 22, bottomButtonWidth, 22).build());
-        pageButton = addRenderableWidget(MapKlussButton.builder(pageButtonText(), button -> nextPage())
-            .action("collections.page_next")
-            .dimensions(left + bottomButtonWidth + gap, work.bottom() - 22, panelWidth - bottomButtonWidth - gap, 22).build());
-        addNavigationControls(shell);
-        addRenderableWidget(MapKlussUi.languageButtonAt(this, shell.topBar().right() - 38, shell.topBar().y() + 9));
+        rebuildControls();
         rebuildCollectionButtons();
-        updatePageButton();
-        focusCreateInput();
-        if (!hasLoadedOnce) {
-            loadCollections();
-        }
+        if(!fixture && !requested) { requested=true; loadCollections(); }
     }
 
     private void loadCollections() {
@@ -137,12 +207,15 @@ public final class CompanionArtCollectionsScreen extends Screen {
         }
     }
 
+    private final java.util.concurrent.atomic.AtomicBoolean creatingCollection = new java.util.concurrent.atomic.AtomicBoolean();
+
     private void createCollection() {
         String name = createInput == null ? "" : createInput.getValue().trim();
         if (name.isEmpty()) {
             status = "Введите название коллекции.";
             return;
         }
+        if (!creatingCollection.compareAndSet(false, true)) return;
         createDraft = name;
         status = "Создание коллекции...";
         CompletableFuture.runAsync(() -> {
@@ -190,7 +263,7 @@ public final class CompanionArtCollectionsScreen extends Screen {
                     runOnClient(() -> status = CompanionUiErrors.message("save", e));
                 }
             }
-        });
+        }).whenComplete((ignored, error) -> creatingCollection.set(false));
     }
 
     private void toggleCollection(CompanionCollection collection) {
@@ -253,69 +326,36 @@ public final class CompanionArtCollectionsScreen extends Screen {
     }
 
     private void rebuildCollectionButtons() {
-        CompanionUiLayout.Rect work = collectionsWork(collectionsShell());
-        int panelWidth = work.width();
-        int x = work.x();
-        int y = listY();
-        int openButtonWidth = panelWidth;
-        List<CompanionCollection> visibleCollections = filteredCollections();
-        int rows = visibleRows();
-        int start = page * rows;
-        int end = Math.min(start + rows, visibleCollections.size());
-        for (int i = start; i < end; i++) {
-            CompanionCollection collection = visibleCollections.get(i);
-            boolean selected = manifest != null && manifest.collectionIds().contains(collection.id());
-            int rowY = y + (i - start) * ROW_HEIGHT;
-            String prefix = selected ? "[x] " : "[ ] ";
-            String count = collection.itemCount() > 0 ? "  [" + collection.itemCount() + "]" : "";
-            addRenderableWidget(MapKlussButton.builder(MapKlussUi.clippedText(font, prefix + collection.name() + count, panelWidth - 8), button -> toggleCollection(collection))
-                .action(selected ? "collections.remove_art" : "collections.add_art")
-                .selected(selected)
-                .dimensions(x, rowY, panelWidth, 20).build());
-            addRenderableWidget(MapKlussButton.builder(Component.literal("Открыть коллекцию"), button ->
-                client().gui.setScreen(new CompanionCollectionItemsScreen(this, collection)))
-                .action("collections.open")
-                .dimensions(x, rowY + 23, openButtonWidth, 20).build());
+        var s=WorkshopCollectionLayout.at(width,height);
+        var filtered=filteredCollections();
+        page=clampPage(page);
+        int start=page*s.rows(),end=Math.min(start+s.rows(),filtered.size());
+        for(int i=start;i<end;i++) {
+            var c=filtered.get(i);
+            var r=s.row(i-start);
+            boolean selected=manifest!=null && manifest.collectionIds().contains(c.id());
+            collectionButton(selected?"collections.remove_art":"collections.add_art",c.name()+"  ["+c.itemCount()+"]",
+                selected?WorkshopIcon.CHECK:WorkshopIcon.LAYERS,
+                new WorkshopLayout.Rect(r.x(),r.y(),r.width()-32,28),false,()->toggleCollection(c)).setSelected(selected);
+            collectionButton("collections.open","Открыть коллекцию",WorkshopIcon.FOLDER,
+                new WorkshopLayout.Rect(r.right()-28,r.y(),28,28),true,()->client().gui.setScreen(new CompanionCollectionItemsScreen(this,c,fixture)));
         }
+        updatePageButton();
     }
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
-        CompanionUiLayout.Shell shell = MapKlussUi.drawShell(
-            context, font, width, height,
-            ScreenViewModel.shell(CompanionUiLayout.Destination.ART, CompanionI18n.translate("Коллекции"),
-                java.util.List.of(fallbackTitle == null ? "Арт" : fallbackTitle), status), false, 52
-        );
-        CompanionUiLayout.Rect work = collectionsWork(shell);
-        int panelWidth = work.width();
-        int left = work.x();
-        MapKlussUi.drawLeft(context, font, "Коллекции", left, listY() - 18, panelWidth, MapKlussUi.MUTED);
-        boolean empty = filteredCollections().isEmpty();
-        if (empty) {
-            MapKlussUi.drawEmptyState(
-                context,
-                font,
-                "Коллекций пока нет",
-                "Создай коллекцию и добавь в неё этот арт",
-                left,
-                listY() + 18,
-                panelWidth,
-                Math.max(40, work.bottom() - listY() - 30)
-            );
-        }
-        super.extractRenderState(context, mouseX, mouseY, delta);
-        MapKlussUi.drawNavigation(context, shell, CompanionUiLayout.Destination.ART);
+    public void extractRenderState(GuiGraphicsExtractor context,int mouseX,int mouseY,float delta) {
+        context.fill(0,0,width,height,0x88000000);
+        var s=WorkshopCollectionLayout.at(width,height);
+        WorkshopChrome.frame(context::fill,s.frame(),workshopTheme);
+        context.fill(s.navigation().x(),s.navigation().bottom()+1,s.navigation().right(),s.navigation().bottom()+2,workshopTheme.color("border-subtle"));
+        WorkshopDraw.text(context,font,(fallbackTitle==null?CompanionI18n.translate("Коллекции"):fallbackTitle),s.heading().x()+4,s.heading().y()+6,s.heading().width()-48,workshopTheme.color("text-primary"));
+        if(filteredCollections().isEmpty()) WorkshopDraw.text(context,font,CompanionI18n.translate("Пусто"),s.list().x()+6,s.list().y()+10,s.list().width()-12,workshopTheme.color("text-secondary"));
+        WorkshopDraw.text(context,font,CompanionI18n.translate(status),s.footer().x()+60,s.footer().y()+6,s.footer().width()-152,workshopTheme.color("text-secondary"));
+        super.extractRenderState(context,mouseX,mouseY,delta);
     }
 
-    private void drawActionGroup(GuiGraphicsExtractor context) {
-        int panelWidth = collectionsWork(collectionsShell()).width();
-        int left = screenLeft(panelWidth);
-        MapKlussUi.drawActionGroupLabel(context, font, "Управление", left, panelWidth, height - 58, 20);
-    }
 
-    private void drawSideRailSections(GuiGraphicsExtractor context, int railLeft) {
-        MapKlussUi.drawSectionAt(context, font, "Список", railLeft, SIDE_RAIL_WIDTH, 60, 78);
-    }
 
     private void applySearch() {
         searchQuery = searchInput == null ? "" : searchInput.getValue().trim();
@@ -369,10 +409,7 @@ public final class CompanionArtCollectionsScreen extends Screen {
         return "Коллекции " + start + "-" + end + " / " + visibleCollections.size() + suffix;
     }
 
-    private int visibleRows() {
-        CompanionUiLayout.Rect work = collectionsWork(collectionsShell());
-        return Math.max(0, Math.min(ROWS, (work.bottom() - 30 - listY()) / ROW_HEIGHT));
-    }
+    private int visibleRows() { return WorkshopCollectionLayout.at(width,height).rows(); }
 
     private int bottomReserved() {
         return 30;
@@ -418,10 +455,10 @@ public final class CompanionArtCollectionsScreen extends Screen {
     private void openDestination(CompanionUiLayout.Destination destination) {
         switch (destination) {
             case LIBRARY -> client().gui.setScreen(new CompanionLibraryScreen(this));
-            case LENS -> client().gui.setScreen(new LensScreen(this));
-            case SCAN -> client().gui.setScreen(new ScanScreen(this));
-            case TRACKER -> client().gui.setScreen(new TrackerOpenScreen(this));
-            case ACCOUNT -> client().gui.setScreen(new CompanionAccountScreen(this));
+            case LENS -> client().gui.setScreen(new LensScreen(this, fixture));
+            case SCAN -> client().gui.setScreen(new ScanScreen(this, fixture));
+            case TRACKER -> client().gui.setScreen(new TrackerOpenScreen(this, fixture));
+            case ACCOUNT -> client().gui.setScreen(new CompanionAccountScreen(this, fixture));
             default -> { }
         }
     }
@@ -430,7 +467,7 @@ public final class CompanionArtCollectionsScreen extends Screen {
         if (searchQuery.isBlank()) return collections;
         List<CompanionCollection> filtered = new ArrayList<>();
         for (CompanionCollection collection : collections) {
-            if (collection.name().toLowerCase().contains(searchQuery)) filtered.add(collection);
+            if (collection.name().toLowerCase(java.util.Locale.ROOT).contains(searchQuery.toLowerCase(java.util.Locale.ROOT))) filtered.add(collection);
         }
         return filtered;
     }

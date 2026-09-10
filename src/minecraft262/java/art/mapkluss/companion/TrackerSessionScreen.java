@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-public final class TrackerSessionScreen extends Screen {
+public final class TrackerSessionScreen extends WorkshopTrackerScreen {
     private static final Map<String, SerialLatestQueue<TrackerMutation>> SESSION_MUTATIONS = new ConcurrentHashMap<>();
     private static final int MATERIAL_ROWS = 12;
     private static final int MATERIAL_ROW_HEIGHT = 24;
@@ -57,21 +57,170 @@ public final class TrackerSessionScreen extends Screen {
         );
     }
 
-    @Override
-    protected void init() {
+
+    private WorkshopTheme workshopTheme = WorkshopTheme.of(WorkshopTheme.DEFAULT_ID);
+    private boolean fixture;
+    private boolean fixtureApplied;
+    private MapKlussButton trackerButton(String id, String label, WorkshopIcon icon, WorkshopLayout.Rect r,
+        java.util.function.BooleanSupplier enabled, boolean selected, Runnable action) {
+        var b = MapKlussButton.builder(CompanionI18n.text(label), ignored -> {
+            if (enabled.getAsBoolean()) action.run();
+        }).action(id).tooltip(CompanionI18n.text(label)).selected(selected)
+            .dimensions(r.x(),r.y(),r.width(),r.height()).enabledWhen(enabled);
+        return addRenderableWidget(b.build().workshop(workshopTheme,icon));
+    }
+    private WorkshopLayout.Rect part(WorkshopLayout.Rect r,int i,int n) { return WorkshopTrackerLayout.part(r,i,n); }
+    private void workshopNavigation(WorkshopTrackerLayout.Layout s) {
+        try { workshopTheme=WorkshopTheme.of(CompanionConfig.load(client().gameDirectory.toPath()).theme()); }
+        catch(Exception ignored) { }
+        int slot=(s.navigation().width()-60)/5;
+        WorkshopIcon[] icons={WorkshopIcon.LIBRARY,WorkshopIcon.LENS,WorkshopIcon.SCAN,WorkshopIcon.TRACKER,WorkshopIcon.ACCOUNT};
+        String[] labels={"Библиотека","Lens","Скан","Трекер","Аккаунт"};
+        for(int i=0;i<5;i++) {
+            var d=CompanionUiLayout.Destination.values()[i];
+            trackerButton(CompanionActionInventory.navigationAction(d),labels[i],icons[i],
+                new WorkshopLayout.Rect(s.navigation().x()+i*slot,s.navigation().y(),slot-4,28),
+                ()->true,d==CompanionUiLayout.Destination.TRACKER,()->openDestination(d));
+        }
+        trackerButton("account.theme","Оформление",WorkshopIcon.LAYERS,
+            new WorkshopLayout.Rect(s.navigation().right()-56,s.navigation().y(),24,28),()->true,false,
+            ()->client().gui.setScreen(new WorkshopAppearanceScreen(this)));
+        trackerButton("global.back","Назад",WorkshopIcon.BACK,
+            new WorkshopLayout.Rect(s.navigation().right()-24,s.navigation().y(),24,28),()->true,false,this::onClose);
+        trackerButton("global.language",CompanionI18n.toggleLabel(client()),null,
+            new WorkshopLayout.Rect(s.footer().right()-32,s.footer().y(),32,20),()->true,false,
+            ()->{try{CompanionI18n.toggle(client()); init();}catch(Exception ignored){}});
+    }
+    private void text(GuiGraphicsExtractor g,String value,WorkshopLayout.Rect r,String color) {
+        if(r.height()<9)return;
+        WorkshopDraw.text(g,font,CompanionI18n.translate(value),r.x()+4,r.y()+4,Math.max(0,r.width()-8),workshopTheme.color(color));
+    }
+    @Override public void onClose() { client().gui.setScreen(parent); }
+
+    private boolean toolsVisible;
+    private boolean previewVisible;
+    private boolean previewFailed;
+    private GatheringArtPreview newGatheringPreview(){return new GatheringArtPreview(value->
+        fixture?value.image_preview():TrackerCloudAssets.preview(CompanionRuntime.create(client()).apiClient(),value));}
+    private GatheringArtPreview gatheringPreview=newGatheringPreview();
+    private final LiveBuildPreviewTexture gatheringTexture=new LiveBuildPreviewTexture();
+    private boolean showGatherPreview(){return previewVisible&&session!=null&&!"building".equals(session.mode());}
+    private boolean opened;
+    private String pendingSearch="";
+    private final Map<String,String> manualDrafts=new java.util.HashMap<>();
+    private Map<String,Integer> automaticProgress;
+    private boolean buildMaterialsRequested;
+    void showBuildMaterials(){
+        buildMaterialsRequested=true;
+        if(session!=null)session=session.withMode("building");
+        toolsVisible=false;previewVisible=false;
+        client().gui.setScreen(this);
+    }
+    private Map<String,Integer> currentProgress() {
+        return automaticProgress!=null&&session!=null&&"building".equals(session.mode())
+            ?automaticProgress:session.currentProgress();
+    }
+    private boolean automaticBuilding(){return automaticProgress!=null&&session!=null&&"building".equals(session.mode());}
+    @Override public void tick(){
+        super.tick();
+        var next=fixture||session==null?null:LiveBuildClient.instance().scannedMaterials(session.art_id(),session.art_version_id());
+        if(next!=null)next=TrackerMaterialCounts.forSession(session.materials(),next);
+        if(!java.util.Objects.equals(next,automaticProgress)){
+            automaticProgress=next;
+            if(session!=null&&"building".equals(session.mode()))rebuildLayout();
+        }
+    }
+    public TrackerSessionScreen(Screen parent,String sessionId,boolean fixture){this(parent,sessionId);this.fixture=fixture;}
+    void applyDevelopmentData(BuildSessionState value,String message,boolean failed){
+        if(!fixture)return;session=value;status=message;loadFailed=failed;
+    }
+    @Override protected void init(){
         requests.attach();
-        clearWidgets();
+        if(fixture&&!fixtureApplied){
+            fixtureApplied=true;
+            try{Class.forName("art.mapkluss.companion.CompanionLibraryDevFixture").getMethod("applyTrackerSession",Object.class).invoke(null,this);}
+            catch(ReflectiveOperationException ignored){}
+        }
         rebuildLayout();
-        load();
+        if(!fixture&&!opened){opened=true;load();}
     }
-
-    @Override
-    public void removed() {
-        requests.detach();
-        super.removed();
+    @Override public void removed(){opened=false;requests.detach();gatheringPreview.close();gatheringPreview=newGatheringPreview();gatheringTexture.close();super.removed();}
+    private void rebuildLayout(){
+        if(searchInput!=null)pendingSearch=searchInput.getValue();
+        clearWidgets();
+        searchInput=null;
+        progressInputs.clear();
+        artButton=stepButton=undoButton=hideDoneButton=null;
+        scrollOffset=clampScrollOffset(scrollOffset,session);
+        var s=WorkshopTrackerLayout.at(width,height);
+        workshopNavigation(s);
+        var t=s.title();
+        trackerButton("tracker.preview",gatheringPreview.failed()?(CompanionI18n.english(client())?"Retry preview":"Повторить превью"):(CompanionI18n.english(client())?"Art progress":"Прогресс арта"),gatheringPreview.failed()?WorkshopIcon.REFRESH:WorkshopIcon.LIBRARY,
+            new WorkshopLayout.Rect(t.right()-52,t.y(),24,20),()->session!=null&&!"building".equals(session.mode()),previewVisible,
+            ()->{if(gatheringPreview.failed()){gatheringPreview.retry();previewVisible=true;}else previewVisible=!previewVisible;toolsVisible=false;rebuildLayout();});
+        trackerButton("tracker.tools","Поиск и действия",WorkshopIcon.MORE,
+            new WorkshopLayout.Rect(t.right()-24,t.y(),24,20),()->true,toolsVisible,()->{toolsVisible=!toolsVisible;rebuildLayout();});
+        if(loadFailed){
+            trackerButton("tracker.retry","Повторить",WorkshopIcon.REFRESH,part(s.modes(),0,2),()->!fixture,false,this::load);
+            trackerButton("tracker.change_session","Изменить UUID",WorkshopIcon.BACK,part(s.modes(),1,2),()->true,false,this::onClose);
+            return;
+        }
+        trackerButton("tracker.status_gathering","Сбор",null,part(s.modes(),0,4),()->session!=null,session!=null&&!"building".equals(session.mode()),()->switchMode("gathering"));
+        trackerButton("tracker.build.open","Стройка",WorkshopIcon.TRACKER,part(s.modes(),1,4),()->session!=null,false,
+            ()->client().gui.setScreen(new LiveBuildScreen(this,session.art_id(),session.art_version_id())));
+        stepButton=trackerButton("tracker.step_cycle","Шаг "+currentStep(),null,part(s.modes(),2,4),()->session!=null,false,this::cycleStep);
+        undoButton=trackerButton("tracker.undo","Отмена",WorkshopIcon.BACK,part(s.modes(),3,4),()->previousSession!=null,false,this::undoLastChange);
+        if(toolsVisible){addTools(s);return;}
+        if(showGatherPreview())return;
+        rebuildMaterialButtons();
+        trackerButton("tracker.table_previous","Пред.",WorkshopIcon.BACK,
+            new WorkshopLayout.Rect(s.footer().right()-88,s.footer().y(),24,20),()->scrollOffset>0,false,()->scrollMaterials(visibleMaterialRows()));
+        trackerButton("tracker.table_next","След.",WorkshopIcon.MORE,
+            new WorkshopLayout.Rect(s.footer().right()-60,s.footer().y(),24,20),()->scrollOffset+visibleMaterialRows()<filteredMaterials().size(),false,()->scrollMaterials(-visibleMaterialRows()));
     }
-
+    private void addTools(WorkshopTrackerLayout.Layout s){
+        var a=s.table();
+        searchInput=new EditBox(font,a.x(),a.y(),a.width()-84,20,CompanionI18n.text("Поиск материалов"));
+        searchInput.setMaxLength(80);searchInput.setValue(pendingSearch);addRenderableWidget(searchInput);
+        trackerButton("tracker.search","Найти",WorkshopIcon.SEARCH,new WorkshopLayout.Rect(a.right()-80,a.y(),24,20),()->true,false,this::applySearch);
+        trackerButton("tracker.search_clear","Сброс",WorkshopIcon.CLOSE,new WorkshopLayout.Rect(a.right()-52,a.y(),24,20),()->true,false,this::clearSearch);
+        hideDoneButton=trackerButton("tracker.hide_completed","Скрыть завершённые",WorkshopIcon.CHECK,new WorkshopLayout.Rect(a.right()-24,a.y(),24,20),()->true,hideCompleted,this::toggleHideCompleted);
+        var row=new WorkshopLayout.Rect(a.x(),a.y()+24,a.width(),20);
+        trackerButton("tracker.open_site","Сайт",WorkshopIcon.LINK,part(row,0,4),()->!fixture,false,this::openTrackerSite);
+        trackerButton("tracker.refresh","Обновить",WorkshopIcon.REFRESH,part(row,1,4),()->!fixture,false,this::load);
+        artButton=trackerButton("tracker.open_art","Арт",WorkshopIcon.LIBRARY,part(row,2,4),()->!fixture&&session!=null&&session.art_id()!=null&&!session.art_id().isBlank(),false,this::openRelatedArt);
+        trackerButton("tracker.status_building",CompanionI18n.english(client())?"Manual":"Счётчик",WorkshopIcon.TRACKER,
+            part(row,3,4),()->session!=null,session!=null&&"building".equals(session.mode()),
+            ()->{toolsVisible=false;previewVisible=false;switchMode("building");});
+    }
+    private String draftKey(BuildSessionMaterial m){return session.mode()+"|"+m.nbtName();}
+    private void rebuildMaterialButtons(){
+        if(session==null)return;
+        var s=WorkshopTrackerLayout.at(width,height);
+        var materials=filteredMaterials();
+        for(int row=0;row<s.rows()&&row+scrollOffset<materials.size();row++){
+            var material=materials.get(row+scrollOffset);
+            var r=s.controls(s.row(row));
+            int fieldWidth=48,gap=4;
+            int bw=(r.width()-fieldWidth-gap*5)/5;
+            EditBox input=new EditBox(font,r.x(),r.y(),fieldWidth,18,CompanionI18n.text("Количество"));
+            input.setMaxLength(7);
+            input.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(materialLabel(material)+" / "+material.count())));
+            input.setValue(automaticBuilding()?Integer.toString(currentProgress().getOrDefault(material.nbtName(),0)):
+                manualDrafts.getOrDefault(draftKey(material),Integer.toString(currentProgress().getOrDefault(material.nbtName(),0))));
+            input.setEditable(!automaticBuilding());
+            input.setResponder(value->{ if (!value.matches("\\d{0,7}")) { input.setValue(value.replaceAll("[^0-9]", "")); return; } manualDrafts.put(draftKey(material),value); });
+            progressInputs.add(new ProgressInput(material,input));addRenderableWidget(input);
+            int x=r.x()+fieldWidth+gap;
+            trackerButton("tracker.set_count","Применить",WorkshopIcon.CHECK,new WorkshopLayout.Rect(x,r.y(),bw,18),()->!automaticBuilding(),false,()->applyManualProgress(material,input.getValue()));
+            trackerButton("tracker.decrement","-",null,new WorkshopLayout.Rect(x+(bw+gap),r.y(),bw,18),()->!automaticBuilding(),false,()->changeProgress(material,-currentStep()));
+            trackerButton("tracker.add_one","+",null,new WorkshopLayout.Rect(x+2*(bw+gap),r.y(),bw,18),()->!automaticBuilding(),false,()->changeProgress(material,currentStep()));
+            trackerButton("tracker.clear_count","0",WorkshopIcon.REFRESH,new WorkshopLayout.Rect(x+3*(bw+gap),r.y(),bw,18),()->!automaticBuilding(),false,()->setProgress(material,0));
+            trackerButton("tracker.complete_all","Все",WorkshopIcon.CHECK,new WorkshopLayout.Rect(x+4*(bw+gap),r.y(),bw,18),()->!automaticBuilding(),false,()->setProgress(material,material.count()));
+        }
+    }
     private void load() {
+        if (fixture) return;
         loadFailed = false;
         status = "Загрузка трекера...";
         rebuildLayout();
@@ -80,6 +229,7 @@ public final class TrackerSessionScreen extends Screen {
     }
 
     private void switchMode(String mode) {
+        buildMaterialsRequested="building".equals(mode);
         if (session == null) return;
         BuildSessionState updated = session.withMode(mode);
         if (updated == session) {
@@ -88,169 +238,9 @@ public final class TrackerSessionScreen extends Screen {
         }
         previousSession = session;
         session = updated;
-        status = "Переключение режима...";
+        status = fixture ? "" : "Переключение режима...";
         rebuildLayout();
-        mutations.submit(TrackerMutation.mode(this, requests.begin("tracker-sync"), mode));
-    }
-
-    private void rebuildLayout() {
-        clearWidgets();
-        progressInputs.clear();
-        scrollOffset = clampScrollOffset(scrollOffset, session);
-        CompanionUiLayout.Shell shell = trackerShell();
-        CompanionUiLayout.Rect work = trackerWork(shell);
-        int panelWidth = work.width();
-        int left = work.x();
-        int gap = 6;
-        addNavigationControls(shell);
-        addRenderableWidget(MapKlussUi.languageButtonAt(this, shell.topBar().right() - 38, shell.topBar().y() + 9));
-        if (loadFailed) {
-            int buttonWidth = Math.max(80, (panelWidth - gap) / 2);
-            int actionY = work.y() + Math.max(40, work.height() / 2);
-            addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Повторить"), button -> load())
-                .action("tracker.retry")
-                .gold().dimensions(left, actionY, buttonWidth, 20).build());
-            addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Изменить UUID"), button -> client().gui.setScreen(parent))
-                .action("tracker.change_session")
-                .dimensions(left + buttonWidth + gap, actionY, panelWidth - buttonWidth - gap, 20).build());
-            return;
-        }
-        int searchButtonWidth = 44;
-        int hideButtonWidth = Math.max(54, Math.min(82, panelWidth / 4));
-        int searchWidth = Math.max(44, panelWidth - searchButtonWidth * 2 - hideButtonWidth - gap * 3);
-        int searchY = work.y() + 48;
-        searchInput = new EditBox(font, left, searchY, searchWidth, 22, CompanionI18n.text("Поиск материалов"));
-        searchInput.setMaxLength(80);
-        searchInput.setValue(searchQuery);
-        addRenderableWidget(searchInput);
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Найти"), button -> applySearch())
-            .action("tracker.search")
-            .dimensions(left + searchWidth + gap, searchY, searchButtonWidth, 22).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Сброс"), button -> clearSearch())
-            .action("tracker.search_clear")
-            .dimensions(left + searchWidth + searchButtonWidth + gap * 2, searchY, searchButtonWidth, 22).build());
-        hideDoneButton = addRenderableWidget(MapKlussButton.builder(hideDoneButtonText(), button -> toggleHideCompleted())
-            .action("tracker.hide_completed")
-            .selected(hideCompleted)
-            .dimensions(left + searchWidth + searchButtonWidth * 2 + gap * 3, searchY, hideButtonWidth, 22).build());
-
-        if (sideRailLayout(panelWidth, left)) {
-            addSideRailControls(panelWidth, left);
-            setFocused(null);
-            searchInput.setFocused(false);
-            updateActionButtons();
-            rebuildMaterialButtons();
-            return;
-        }
-
-        int threeButtonWidth = Math.max(58, (panelWidth - gap * 2) / 3);
-        int fourButtonWidth = Math.max(44, (panelWidth - gap * 3) / 4);
-        int row1 = actionTop();
-        int row2 = row1 + ACTION_ROW_HEIGHT;
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Сайт"), button -> openTrackerSite())
-            .action("tracker.open_site")
-            .action("tracker.open_site")
-            .technical().dimensions(left, row1, threeButtonWidth, 20).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Обновить"), button -> load())
-            .action("tracker.refresh")
-            .action("tracker.refresh")
-            .technical().dimensions(left + threeButtonWidth + gap, row1, threeButtonWidth, 20).build());
-        artButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Арт"), button -> openRelatedArt())
-            .action("tracker.open_art")
-            .action("tracker.open_art")
-            .special().dimensions(left + (threeButtonWidth + gap) * 2, row1, panelWidth - (threeButtonWidth + gap) * 2, 20).build());
-
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Сбор"), button -> switchMode("gathering"))
-            .action("tracker.status_gathering")
-            .action("tracker.status_gathering")
-            .selected(session == null || !"building".equals(session.mode()))
-            .dimensions(left, row2, fourButtonWidth, 20).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Стройка"), button -> switchMode("building"))
-            .action("tracker.status_building")
-            .action("tracker.status_building")
-            .selected(session != null && "building".equals(session.mode()))
-            .dimensions(left + fourButtonWidth + gap, row2, fourButtonWidth, 20).build());
-        stepButton = addRenderableWidget(MapKlussButton.builder(stepButtonText(), button -> cycleStep())
-            .action("tracker.step_cycle")
-            .action("tracker.step_cycle")
-            .dimensions(left + (fourButtonWidth + gap) * 2, row2, fourButtonWidth, 20).build());
-        undoButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Отмена"), button -> undoLastChange()).danger()
-            .action("tracker.undo")
-            .action("tracker.undo")
-            .dimensions(left + (fourButtonWidth + gap) * 3, row2, fourButtonWidth, 20).build());
-        setFocused(null);
-        searchInput.setFocused(false);
-        updateActionButtons();
-        rebuildMaterialButtons();
-    }
-
-    private void addSideRailControls(int panelWidth, int left) {
-        int x = sideRailLeft(panelWidth, left);
-        int buttonWidth = SIDE_RAIL_WIDTH;
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Сайт"), button -> openTrackerSite())
-            .technical().dimensions(x, 80, buttonWidth, 20).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Обновить"), button -> load())
-            .technical().dimensions(x, 106, buttonWidth, 20).build());
-        artButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Арт"), button -> openRelatedArt())
-            .special().dimensions(x, 132, buttonWidth, 20).build());
-
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Сбор"), button -> switchMode("gathering"))
-            .selected(session == null || !"building".equals(session.mode()))
-            .dimensions(x, 206, buttonWidth, 20).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Стройка"), button -> switchMode("building"))
-            .selected(session != null && "building".equals(session.mode()))
-            .dimensions(x, 232, buttonWidth, 20).build());
-        stepButton = addRenderableWidget(MapKlussButton.builder(stepButtonText(), button -> cycleStep())
-            .dimensions(x, 258, buttonWidth, 20).build());
-        undoButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Отмена"), button -> undoLastChange()).danger()
-            .dimensions(x, 284, buttonWidth, 20).build());
-
-    }
-
-    private void rebuildMaterialButtons() {
-        if (session == null || session.materials() == null) return;
-        int panelWidth = trackerWork(trackerShell()).width();
-        int left = screenLeft(panelWidth);
-        int gap = 4;
-        int actionsWidth = 44 + 28 + 38 + 38 + 24 + 36 + gap * 5;
-        int actionX = left + panelWidth - actionsWidth;
-        int y = materialY();
-        Map<String, Integer> progress = session.currentProgress();
-        List<BuildSessionMaterial> visibleMaterials = filteredMaterials();
-        int rows = visibleMaterialRows();
-        int start = scrollOffset;
-        int end = Math.min(start + rows, visibleMaterials.size());
-        for (int i = start; i < end; i++) {
-            BuildSessionMaterial material = visibleMaterials.get(i);
-            int visibleRow = i - start;
-            int rowY = y + visibleRow * MATERIAL_ROW_HEIGHT;
-            int value = progress.getOrDefault(material.nbtName(), 0);
-            EditBox input = new EditBox(font, actionX, rowY + 1, 44, 18, CompanionI18n.text("Количество"));
-            input.setMaxLength(7);
-            input.setResponder(text -> {
-                String cleaned = text == null ? "" : text.replaceAll("\\D", "");
-                if (cleaned.length() > 7) cleaned = cleaned.substring(0, 7);
-                if (!cleaned.equals(text)) input.setValue(cleaned);
-            });
-            input.setValue(Integer.toString(value));
-            progressInputs.add(new ProgressInput(material, input));
-            addRenderableWidget(input);
-            addRenderableWidget(MapKlussButton.builder(Component.literal("OK"), button -> applyManualProgress(material, input.getValue())).gold()
-                .action("tracker.set_count")
-                .dimensions(actionX + 44 + gap, rowY + 1, 28, 18).build());
-            addRenderableWidget(MapKlussButton.builder(Component.literal("-" + currentStep()), button -> changeProgress(material, -currentStep())).danger()
-                .action("tracker.decrement")
-                .dimensions(actionX + 72 + gap * 2, rowY + 1, 38, 18).build());
-            addRenderableWidget(MapKlussButton.builder(Component.literal("+" + currentStep()), button -> changeProgress(material, currentStep())).gold()
-                .action("tracker.add_one")
-                .dimensions(actionX + 110 + gap * 3, rowY + 1, 38, 18).build());
-            addRenderableWidget(MapKlussButton.builder(Component.literal("0"), button -> setProgress(material, 0)).danger()
-                .action("tracker.clear_count")
-                .dimensions(actionX + 148 + gap * 4, rowY + 1, 24, 18).build());
-            addRenderableWidget(MapKlussButton.builder(Component.literal("Все"), button -> setProgress(material, material.count())).gold()
-                .action("tracker.complete_all")
-                .dimensions(actionX + 172 + gap * 5, rowY + 1, 36, 18).build());
-        }
+        if (!fixture) mutations.submit(TrackerMutation.mode(this, requests.begin("tracker-sync"), mode));
     }
 
     private void applyManualProgress(BuildSessionMaterial material, String rawValue) {
@@ -267,10 +257,13 @@ public final class TrackerSessionScreen extends Screen {
     }
 
     private void changeProgress(BuildSessionMaterial material, int delta) {
+        if (session != null) manualDrafts.remove(draftKey(material));
         if (session == null) return;
+        if(automaticBuilding())return;
         BuildSessionState nextSession = session.withProgress(material.nbtName(), delta);
         if (sameProgress(session, nextSession)) {
             status = "Без изменений: " + material.displayName() + ".";
+            rebuildLayout();
             return;
         }
         previousSession = session;
@@ -280,12 +273,15 @@ public final class TrackerSessionScreen extends Screen {
     }
 
     private void setProgress(BuildSessionMaterial material, int value) {
+        if(automaticBuilding())return;
+        if (session != null) manualDrafts.remove(draftKey(material));
         if (session == null) return;
         BuildSessionState nextSession = session.withAbsoluteProgress(material.nbtName(), value);
         if (sameProgress(session, nextSession)) {
             status = value <= 0
                 ? material.displayName() + " уже сброшен."
                 : material.displayName() + " уже заполнен.";
+            rebuildLayout();
             return;
         }
         previousSession = session;
@@ -297,6 +293,7 @@ public final class TrackerSessionScreen extends Screen {
     }
 
     private void undoLastChange() {
+        if(automaticBuilding())return;
         if (previousSession == null) {
             status = "Отменять нечего.";
             return;
@@ -307,6 +304,7 @@ public final class TrackerSessionScreen extends Screen {
         session = restore;
         status = "Отмена последнего изменения...";
         rebuildLayout();
+        if (fixture) { status = ""; return; }
         if (!java.util.Objects.equals(current.mode(), restore.mode())) {
             mutations.submit(TrackerMutation.combined(this, requests.begin("tracker-sync"), restore.mode(), restore));
         } else {
@@ -315,10 +313,13 @@ public final class TrackerSessionScreen extends Screen {
     }
 
     private void syncSession(BuildSessionState nextSession) {
+        rebuildLayout();
+        if (fixture) { status = ""; return; }
         mutations.submit(TrackerMutation.progress(this, requests.begin("tracker-sync"), nextSession));
     }
 
     private void performMutation(TrackerMutation mutation) {
+        if (fixture) return;
         try {
             CompanionRuntime runtime = CompanionRuntime.create(client());
             if (!mutation.loadOnly() && mutation.mode() != null) {
@@ -338,7 +339,7 @@ public final class TrackerSessionScreen extends Screen {
             }
             runOnClient(mutation.request(), () -> {
                 loadFailed = false;
-                session = loaded;
+                session = buildMaterialsRequested?loaded.withMode("building"):loaded;
                 scrollOffset = clampScrollOffset(scrollOffset, loaded);
                 status = mutation.loadOnly()
                     ? ""
@@ -361,144 +362,71 @@ public final class TrackerSessionScreen extends Screen {
         }
     }
 
-    @Override
-    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
-        CompanionUiLayout.Shell shell = MapKlussUi.drawShell(
-            context, font, width, height,
-            ScreenViewModel.shell(CompanionUiLayout.Destination.TRACKER, CompanionI18n.translate("Трекер"),
-                java.util.List.of(CompanionI18n.translate("Сессия")), status), false
-        );
-        CompanionUiLayout.Rect work = trackerWork(shell);
-        int panelWidth = work.width();
-        int left = work.x();
-        if (loadFailed) {
-            MapKlussUi.drawEmptyState(context, font, "Сессия не найдена", "Проверьте UUID и повторите", left, work.y() + 30, panelWidth, Math.max(44, work.height() - 80));
-            super.extractRenderState(context, mouseX, mouseY, delta);
-            MapKlussUi.drawNavigation(context, shell, CompanionUiLayout.Destination.TRACKER);
-            return;
-        }
-        if (session != null) {
-            String titleLine = session.info() != null && session.info().title() != null && !session.info().title().isBlank()
-                ? session.info().title()
-                : sessionId;
-            MapKlussUi.drawLeft(context, font, titleLine, left, work.y() + 2, panelWidth, MapKlussUi.WHITE);
-            int done = "building".equals(session.mode()) ? session.placedBlocks() : session.gatheredBlocks();
-            MapKlussUi.drawCenteredIn(
-                context,
-                font,
-                "Режим: " + readableMode(session.mode()) + " / " + done + " / " + session.totalBlocks(),
-                left,
-                work.y() + 20,
-                panelWidth - 12,
-                MapKlussUi.ACCENT
-            );
-            MapKlussUi.drawLeft(
-                context,
-                font,
-                pageSummary(),
-                left,
-                materialY() - 18,
-                panelWidth - 12,
-                MapKlussUi.MUTED
-            );
-                int y = materialRenderY();
-                if (session.materials() != null) {
-                    int gap = 4;
-                    int actionsWidth = 44 + 28 + 38 + 38 + 24 + 36 + gap * 5;
-                    int actionX = left + panelWidth - actionsWidth;
-                    int iconX = left + 4;
-                    int nameX = left + 26;
-                    int countX = Math.max(nameX + 84, actionX - 46);
-                    int nameWidth = Math.max(72, countX - nameX - 8);
-                    drawMaterialColumnHeaders(context, left, panelWidth, actionX, nameX, nameWidth, countX, actionsWidth);
-                    List<BuildSessionMaterial> visibleMaterials = filteredMaterials();
-                int rows = visibleMaterialRows();
-                int start = scrollOffset;
-                int end = Math.min(start + rows, visibleMaterials.size());
-                for (int i = start; i < end; i++) {
-                    BuildSessionMaterial material = visibleMaterials.get(i);
-                    int visibleRow = i - start;
-                    int rowY = y + visibleRow * MATERIAL_ROW_HEIGHT;
-                    context.item(CompanionMaterialIcons.stackFor(material), iconX, rowY + 1);
-                    MapKlussUi.drawLeft(context, font, materialLabel(material), nameX, rowY + 4, nameWidth, MapKlussUi.MUTED);
-                    MapKlussUi.drawLeft(context, font, "/" + material.count(), countX, rowY + 4, 42, MapKlussUi.WHITE);
-                }
+
+    @Override public void extractRenderState(GuiGraphicsExtractor g,int mouseX,int mouseY,float delta){
+        var s=WorkshopTrackerLayout.at(width,height);
+        g.fill(0,0,width,height,0x88000000);WorkshopChrome.frame(g::fill,s.frame(),workshopTheme);
+        text(g,session==null?(loadFailed?"Сессия не найдена":"Загрузка..."):fallbackTitle(),
+            new WorkshopLayout.Rect(s.title().x(),s.title().y(),s.title().width()-60,20),"text-primary");
+        if(!toolsVisible&&showGatherPreview()&&!loadFailed){
+            gatheringPreview.update(session,CompanionMaterialIcons.mapColours(session));var frame=gatheringPreview.frame();
+            if(previewFailed!=gatheringPreview.failed()){previewFailed=gatheringPreview.failed();rebuildLayout();}
+            text(g,(CompanionI18n.english(client())?"Gathered ":"Собрано ")+GatheringArtPreview.percent(session)+"%",s.header(),"text-secondary");
+            if(frame!=null)WorkshopDraw.image(g,gatheringTexture.get(frame.width(),frame.height(),frame.pixels(),frame.revision()),s.table(),frame.width(),frame.height());
+            else text(g,CompanionI18n.english(client())?(gatheringPreview.failed()?"Preview unavailable":"Loading..."):
+                (gatheringPreview.failed()?"Превью недоступно":"Загрузка..."),s.table(),"text-secondary");
+        }else if(!toolsVisible&&session!=null&&!loadFailed){
+            text(g,"Материал",s.header(),"text-secondary");
+            var materials=filteredMaterials();
+            for(int i=0;i<s.rows()&&i+scrollOffset<materials.size();i++){
+                var m=materials.get(i+scrollOffset);var r=s.row(i);var controls=s.controls(r);
+                g.fill(r.x(),r.y(),r.right(),r.bottom(),workshopTheme.color(i%2==0?"surface-secondary":"surface-primary"));
+                g.item(CompanionMaterialIcons.stackFor(m),r.x()+2,r.y()+1);
+                int labelWidth=s.compact()?r.width()-112:controls.x()-r.x()-104;
+                text(g,materialLabel(m),new WorkshopLayout.Rect(r.x()+22,r.y(),Math.max(0,labelWidth),18),"text-primary");
+                int value=currentProgress().getOrDefault(m.nbtName(),0);
+                int countX=s.compact()?r.right()-90:controls.x()-80;
+                text(g,value+"/"+m.count(),new WorkshopLayout.Rect(countX,r.y(),76,18),"text-secondary");
+                int barWidth=s.compact()?r.width():controls.x()-r.x()-6;
+                g.fill(r.x(),r.bottom()-2,r.x()+barWidth,r.bottom(),workshopTheme.color("border"));
+                if(m.count()>0)g.fill(r.x(),r.bottom()-2,r.x()+(int)((long)barWidth*Math.min(value,m.count())/m.count()),r.bottom(),workshopTheme.color("accent"));
             }
+            if(materials.isEmpty())text(g,"Материалов нет.",s.table(),"text-secondary");
         }
-        super.extractRenderState(context, mouseX, mouseY, delta);
-        MapKlussUi.drawNavigation(context, shell, CompanionUiLayout.Destination.TRACKER);
-    }
-
-    private void drawActionGroups(GuiGraphicsExtractor context) {
-        int panelWidth = trackerWork(trackerShell()).width();
-        int left = screenLeft(panelWidth);
-        int row1 = actionTop();
-        int row2 = row1 + ACTION_ROW_HEIGHT;
-        drawActionLabel(context, left, panelWidth, row1, "СЕССИЯ");
-        drawActionLabel(context, left, panelWidth, row2, "ПРОГРЕСС");
-    }
-
-    private void drawMaterialColumnHeaders(
-        GuiGraphicsExtractor context,
-        int left,
-        int panelWidth,
-        int actionX,
-        int nameX,
-        int nameWidth,
-        int countX,
-        int actionsWidth
-    ) {
-        int y = materialY() - 14;
-        context.fill(left + 2, y - 3, left + panelWidth - 2, y - 2, 0x6650505D);
-        MapKlussUi.drawLeft(context, font, "Материал", nameX, y, nameWidth, MapKlussUi.CYAN);
-        MapKlussUi.drawLeft(context, font, "Всего", countX, y, 42, MapKlussUi.CYAN);
-        MapKlussUi.drawLeft(context, font, "Свое", actionX, y, 44, MapKlussUi.CYAN);
-        MapKlussUi.drawLeft(context, font, "OK", actionX + 48, y, 28, MapKlussUi.CYAN);
-        MapKlussUi.drawLeft(context, font, "-" + currentStep(), actionX + 80, y, 38, MapKlussUi.CYAN);
-        MapKlussUi.drawLeft(context, font, "+" + currentStep(), actionX + 122, y, 38, MapKlussUi.CYAN);
-        MapKlussUi.drawLeft(context, font, "0", actionX + 164, y, 24, MapKlussUi.CYAN);
-        MapKlussUi.drawLeft(context, font, "Все", actionX + actionsWidth - 36, y, 36, MapKlussUi.CYAN);
-    }
-
-    private void drawSideRailSections(GuiGraphicsExtractor context, int railLeft) {
-        MapKlussUi.drawSectionAt(context, font, "Сессия", railLeft, SIDE_RAIL_WIDTH, 60, 104);
-        MapKlussUi.drawSectionAt(context, font, "Прогресс", railLeft, SIDE_RAIL_WIDTH, 186, 132);
-    }
-
-    private void drawActionLabel(GuiGraphicsExtractor context, int left, int panelWidth, int rowY, String label) {
-        MapKlussUi.drawActionGroupLabel(context, font, label, left, panelWidth, rowY, ACTION_BUTTON_HEIGHT);
-    }
-
-    @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
-        if (isOverMaterialTable(mouseX, mouseY)) {
-            clearTableFocus();
-            scrollMaterials(verticalAmount);
-            return true;
+        String summary=status;
+        if(summary.isBlank()&&session!=null){
+            int done=automaticBuilding()?session.materials().stream().mapToInt(m->Math.min(m.count(),currentProgress().getOrDefault(m.nbtName(),0))).sum():
+                "building".equals(session.mode())?session.placedBlocks():session.gatheredBlocks();
+            summary=done+" / "+session.totalBlocks();
         }
-        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+        text(g,summary,new WorkshopLayout.Rect(s.footer().x(),s.footer().y(),Math.max(0,s.footer().width()-96),20),"text-secondary");
+        super.extractRenderState(g,mouseX,mouseY,delta);
     }
 
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
-            for (ProgressInput progressInput : progressInputs) {
-                if (progressInput.widget().isFocused()) {
-                    applyManualProgress(progressInput.material(), progressInput.widget().getValue());
-                    return true;
-                }
-            }
+    @Override public boolean mouseScrolled(double x,double y,double horizontal,double vertical){
+        if(!toolsVisible&&isOverMaterialTable(x,y)&&vertical!=0){
+            clearTableFocus();return scrollMaterials(vertical);
+        }
+        return super.mouseScrolled(x,y,horizontal,vertical);
+    }
+    @Override protected boolean submitFocusedInput(){
+        if(searchInput!=null&&searchInput.isFocused()){applySearch();return true;}
+        for(var input:progressInputs)if(input.widget().isFocused()){
+            applyManualProgress(input.material(),input.widget().getValue());return true;
         }
         return false;
     }
-
     private void applySearch() {
         searchQuery = searchInput == null ? "" : searchInput.getValue().trim().toLowerCase();
+        toolsVisible = false;
         scrollOffset = 0;
         rebuildLayout();
     }
 
     private void clearSearch() {
         searchQuery = "";
+        pendingSearch = "";
+        if (searchInput != null) searchInput.setValue("");
         scrollOffset = 0;
         rebuildLayout();
     }
@@ -581,75 +509,19 @@ public final class TrackerSessionScreen extends Screen {
         return "Материалы " + start + "-" + end + " / " + visibleMaterials.size() + filtered + " / шаг " + currentStep();
     }
 
-    private int visibleMaterialRows() {
-        return Math.max(0, Math.min(MATERIAL_ROWS, (materialTableBottomY() - materialY() - 8) / MATERIAL_ROW_HEIGHT));
-    }
 
-    private int actionTop() {
-        CompanionUiLayout.Rect work = trackerWork(trackerShell());
-        return Math.max(materialY() + 34, work.bottom() - 54);
+    private int visibleMaterialRows(){return WorkshopTrackerLayout.at(width,height).rows();}
+    private boolean isOverMaterialTable(double x,double y){
+        var r=WorkshopTrackerLayout.at(width,height).table();
+        return x>=r.x()&&x<r.right()&&y>=r.y()&&y<r.bottom();
     }
-
-    private boolean isOverMaterialTable(double mouseX, double mouseY) {
-        int panelWidth = trackerWork(trackerShell()).width();
-        int left = screenLeft(panelWidth);
-        return mouseX >= left - 6
-            && mouseX <= left + panelWidth + 6
-            && mouseY >= materialY() - 4
-            && mouseY <= materialTableBottomY();
-    }
-
-    private int materialTableBottomY() {
-        return actionTop() - 18;
-    }
-
-    private boolean sideRailLayout(int panelWidth, int left) {
-        return false;
-    }
-
-    private int sideRailLeft(int panelWidth, int left) {
-        return left + panelWidth + SIDE_RAIL_GAP;
-    }
-
-    private int screenLeft(int panelWidth) {
-        return trackerWork(trackerShell()).x();
-    }
-
-    private int materialY() {
-        return trackerWork(trackerShell()).y() + 94;
-    }
-
-    private int materialRenderY() {
-        return materialY() + 4;
-    }
-
-    private CompanionUiLayout.Shell trackerShell() {
-        return CompanionUiLayout.shell(width, height, false);
-    }
-
-    private CompanionUiLayout.Rect trackerWork(CompanionUiLayout.Shell shell) {
-        CompanionUiLayout.Rect content = shell.content();
-        return new CompanionUiLayout.Rect(content.x() + 14, content.y() + 12, Math.max(1, content.width() - 28), Math.max(1, content.height() - 24));
-    }
-
-    private void addNavigationControls(CompanionUiLayout.Shell shell) {
-        for (int i = 0; i <= CompanionUiLayout.Destination.ACCOUNT.ordinal(); i++) {
-            CompanionUiLayout.Destination destination = CompanionUiLayout.Destination.values()[i];
-            CompanionUiLayout.Rect rect = CompanionUiLayout.navigationButton(shell, i);
-            addRenderableWidget(MapKlussButton.builder(Component.literal(""), button -> openDestination(destination))
-                .action(CompanionActionInventory.navigationAction(destination))
-                .tooltip(CompanionI18n.text(destinationLabel(destination)))
-                .dimensions(rect.x(), rect.y(), rect.width(), rect.height()).build());
-        }
-    }
-
     private void openDestination(CompanionUiLayout.Destination destination) {
         switch (destination) {
             case LIBRARY -> client().gui.setScreen(new CompanionLibraryScreen(this));
-            case LENS -> client().gui.setScreen(new LensScreen(this));
-            case SCAN -> client().gui.setScreen(new ScanScreen(this));
-            case TRACKER -> { }
-            case ACCOUNT -> client().gui.setScreen(new CompanionAccountScreen(this));
+            case LENS -> client().gui.setScreen(new LensScreen(this, fixture));
+            case SCAN -> client().gui.setScreen(new ScanScreen(this, fixture));
+            case TRACKER -> client().gui.setScreen(new TrackerOpenScreen(parent, fixture));
+            case ACCOUNT -> client().gui.setScreen(new CompanionAccountScreen(this, fixture));
             default -> { }
         }
     }
@@ -710,7 +582,7 @@ public final class TrackerSessionScreen extends Screen {
 
     private List<BuildSessionMaterial> filteredMaterials(BuildSessionState state) {
         if (state == null || state.materials() == null || state.materials().isEmpty()) return List.of();
-        Map<String, Integer> progress = state.currentProgress();
+        Map<String, Integer> progress = state==session?currentProgress():state.currentProgress();
         List<BuildSessionMaterial> filtered = new ArrayList<>();
         for (BuildSessionMaterial material : state.materials()) {
             if (hideCompleted && progress.getOrDefault(material.nbtName(), 0) >= material.count()) continue;

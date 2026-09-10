@@ -12,6 +12,20 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 final class SuppressionSessionStoreTest {
     @TempDir Path tempDir;
 
+    @Test void retainsExactCatalogLinkAndRejectsMalformedLink() throws Exception {
+        var store=SuppressionSessionStore.forRunDir(tempDir);
+        var link=new LiveBuildCatalogLink("d".repeat(64),1);
+        var session=new SuppressionSessionStore.StoredSession(4,"plan.json","art.litematic",
+            "a".repeat(64),"b".repeat(64),null,null,"fixture",SuppressionStage.WAITING_ANCHOR,
+            0,0,0,null,null,0,0,0,0,false,123L,link);
+        store.save(session);
+        assertEquals(link,store.load().trackerSource());
+        var file=tempDir.resolve("config/mapkluss-companion/suppression-session.json");
+        String json=java.nio.file.Files.readString(file).replace("\"tile\": 1","\"tile\": 100");
+        java.nio.file.Files.writeString(file,json);
+        assertThrows(java.io.IOException.class,store::load);
+    }
+
     @Test
     void roundTripsPinnedLocalProgress() throws Exception {
         SuppressionSessionStore store = SuppressionSessionStore.forRunDir(tempDir);

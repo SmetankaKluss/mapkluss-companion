@@ -13,6 +13,20 @@ import net.minecraft.network.chat.Component;
 public final class SuppressionStartScreen extends Screen {
     private final Screen parent;
     private final CompanionManifest manifest;
+    private boolean fixture;
+    private java.util.List<String> fixtureLines = java.util.List.of();
+    private SuppressionStage fixtureStage;
+
+    private boolean sessionActive() { return fixture ? sessionPreview != null : SuppressionManager.instance().active(); }
+    private java.util.List<String> sessionLines() { return fixture ? fixtureLines : SuppressionManager.instance().hudLines(); }
+
+    void applyDevelopmentSession(SuppressionBundleCatalog preview, java.util.List<String> lines, SuppressionStage stage) {
+        fixture = true;
+        sessionPreview = preview;
+        fixtureLines = java.util.List.copyOf(lines);
+        fixtureStage = stage;
+    }
+
     private String status = "";
     private boolean busy;
     private boolean stopConfirmation;
@@ -25,79 +39,125 @@ public final class SuppressionStartScreen extends Screen {
         this.manifest = manifest;
     }
 
+    private SuppressionBundle previewBundle;
+    private SuppressionBundleCatalog sessionPreview;
+
+    private WorkshopTheme workshopTheme = WorkshopTheme.of(WorkshopTheme.DEFAULT_ID);
+    private final SuppressionPreviewTexture previewTexture = new SuppressionPreviewTexture();
+    private boolean showPreview;
+
+    private MapKlussButton layerButton(String id, String label, WorkshopIcon icon, WorkshopLayout.Rect r,
+        java.util.function.BooleanSupplier enabled, boolean selected, Runnable action) {
+        var builder = MapKlussButton.builder(CompanionI18n.text(label), button -> {
+            if (enabled.getAsBoolean() && (!fixture || !id.startsWith("two_layer.") || id.equals("two_layer.preview"))) action.run();
+        }).action(id).tooltip(CompanionI18n.text(label)).selected(selected)
+            .dimensions(r.x(), r.y(), r.width(), r.height()).enabledWhen(() -> enabled.getAsBoolean() && (!fixture || !id.startsWith("two_layer.") || id.equals("two_layer.preview")));
+        if (id.equals("two_layer.select_part") || id.equals("two_layer.resume")) builder.gold();
+        if (id.equals("two_layer.stop")) builder.danger().navigationOrder(1000);
+        return addRenderableWidget(builder.build().workshop(workshopTheme, icon));
+    }
+
+    private WorkshopLayout.Rect part(WorkshopLayout.Rect r, int index, int count) {
+        int w = (r.width() - (count - 1) * 4) / count;
+        return new WorkshopLayout.Rect(r.x() + index * (w + 4), r.y(), w, r.height());
+    }
+
+    private void workshopNavigation(WorkshopTwoLayerLayout.Layout s) {
+        try { workshopTheme = WorkshopTheme.of(CompanionConfig.load(client().gameDirectory.toPath()).theme()); }
+        catch (Exception ignored) { }
+        int slot = (s.navigation().width() - 60) / 5;
+        WorkshopIcon[] icons = {WorkshopIcon.LIBRARY, WorkshopIcon.LENS, WorkshopIcon.SCAN, WorkshopIcon.TRACKER, WorkshopIcon.ACCOUNT};
+        String[] labels = {"Библиотека", "Lens", "Сканирование", "Трекер", "Аккаунт"};
+        for (int i = 0; i < 5; i++) {
+            var d = CompanionUiLayout.Destination.values()[i];
+            layerButton(CompanionActionInventory.navigationAction(d), labels[i], icons[i],
+                new WorkshopLayout.Rect(s.navigation().x() + i * slot, s.navigation().y(), slot - 4, 28),
+                () -> !busy, false, () -> openDestination(d));
+        }
+        layerButton("account.theme", "Оформление", WorkshopIcon.LAYERS,
+            new WorkshopLayout.Rect(s.navigation().right() - 56, s.navigation().y(), 24, 28),
+            () -> !busy, false, () -> client().gui.setScreen(new WorkshopAppearanceScreen(this)));
+        layerButton("global.back", "Назад", WorkshopIcon.BACK,
+            new WorkshopLayout.Rect(s.navigation().right() - 24, s.navigation().y(), 24, 28),
+            () -> !busy, false, this::onClose);
+        layerButton("global.language", CompanionI18n.toggleLabel(client()), null,
+            new WorkshopLayout.Rect(s.footer().right() - 32, s.footer().y(), 32, 20),
+            () -> !busy, false, () -> { try { CompanionI18n.toggle(client()); init(); } catch (Exception ignored) { } });
+    }
+
+    private void text(GuiGraphicsExtractor g, String value, WorkshopLayout.Rect r, String color) {
+        WorkshopDraw.text(g, font, CompanionI18n.translate(value), r.x() + 4, r.y() + 7,
+            Math.max(0, r.width() - 8), workshopTheme.color(color));
+    }
+
+    private void drawPreview(GuiGraphicsExtractor g, SuppressionBundleCatalog value, WorkshopLayout.Rect area,
+        SuppressionBundleCatalog.Tile selected) {
+        g.fill(area.x(), area.y(), area.right(), area.bottom(), workshopTheme.color("field-bg"));
+        if (value == null) {
+            WorkshopDraw.icon(g, WorkshopIcon.LAYERS, area.x() + area.width() / 2 - 8,
+                area.y() + area.height() / 2 - 8, workshopTheme.color("text-secondary"));
+            return;
+        }
+        var r = WorkshopLayout.contain(area, value.gridWide() * 128, value.gridTall() * 128);
+        try {
+            WorkshopDraw.image(g, previewTexture.get(value), area, value.gridWide() * 128, value.gridTall() * 128);
+        } catch (RuntimeException error) { text(g, "Превью недоступно", area, "text-secondary"); return; }
+        if (selected != null) {
+            int x = r.x() + r.width() * selected.column() / value.gridWide();
+            int y = r.y() + r.height() * selected.row() / value.gridTall();
+            int right = r.x() + r.width() * (selected.column() + 1) / value.gridWide();
+            int bottom = r.y() + r.height() * (selected.row() + 1) / value.gridTall();
+            int color = workshopTheme.color("accent");
+            g.fill(x, y, right, y + 1, color); g.fill(x, bottom - 1, right, bottom, color);
+            g.fill(x, y, x + 1, bottom, color); g.fill(right - 1, y, right, bottom, color);
+        }
+    }
+
     @Override
     protected void init() {
         requests.attach();
         clearWidgets();
-        CompanionUiLayout.Shell shell = workflowShell();
-        addNavigationControls(shell);
-        CompanionUiLayout.Rect panel = taskPanel(shell);
-        int gap = 6;
-        int innerLeft = panel.x() + 12;
-        int innerWidth = Math.max(1, panel.width() - 24);
-        int sourceY = panel.y() + 54;
-        int buttonWidth = Math.max(54, (innerWidth - gap) / 2);
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Из облака"), button -> startCloud())
-            .action("two_layer.start_cloud")
-            .special().tooltip(CompanionI18n.text(manifest != null && manifest.hasSuppressionBundle() ? "Облачный план" : "Требуется арт с Two-layer файлами"))
-            .dimensions(innerLeft, sourceY, buttonWidth, 22).enabledWhen(() -> !busy && !SuppressionManager.instance().active()
-                && manifest != null && manifest.hasSuppressionBundle()).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal("Импорт ZIP"), button -> chooseLocalZip())
-            .action("two_layer.import_zip")
-            .special()
-            .dimensions(innerLeft + buttonWidth + gap, sourceY, innerWidth - buttonWidth - gap, 22)
-            .enabledWhen(() -> !busy && !SuppressionManager.instance().active()).build());
-
-        int footerY = panel.bottom() - 34;
-        int backWidth = Math.min(88, Math.max(64, innerWidth / 5));
-        addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Назад"), button -> client().gui.setScreen(parent))
-            .action("global.back")
-            .dimensions(innerLeft, footerY, backWidth, 22).enabledWhen(() -> !busy).build());
-
-        int stopWidth = Math.min(104, Math.max(76, innerWidth / 4));
-        int sessionX = innerLeft + backWidth + gap;
-        int sessionWidth = Math.max(56, innerWidth - backWidth - stopWidth - gap * 2);
-        addRenderableWidget(MapKlussButton.builder(Component.literal(sessionActionLabel()), button -> {
+        var s = WorkshopTwoLayerLayout.at(width, height);
+        workshopNavigation(s);
+        var bundle = SuppressionManager.instance().previewBundle();
+        if (!fixture && bundle != previewBundle) {
+            previewTexture.close();
+            previewBundle = bundle;
+            sessionPreview = bundle == null ? null : SuppressionBundleCatalog.single(bundle);
+        }
+        if (!sessionActive()) {
+        layerButton("two_layer.start_cloud", "Из облака", WorkshopIcon.DOWNLOAD, s.source(0),
+            () -> !busy && !sessionActive() && manifest != null && manifest.hasSuppressionBundle(),
+            false, this::startCloud);
+        layerButton("two_layer.import_zip", "Импорт ZIP", WorkshopIcon.FOLDER, s.source(1),
+            () -> !busy && !sessionActive(), false, this::chooseLocalZip);
+        } else if (!s.split()) {
+            layerButton("two_layer.preview", showPreview ? "Текущий этап" : "Превью", WorkshopIcon.LAYERS, s.paging(),
+                () -> !busy, showPreview, () -> { showPreview = !showPreview; init(); });
+        }
+        layerButton("two_layer.resume", sessionActionLabel(), WorkshopIcon.CHECK, part(s.actions(), 0, 2),
+            () -> !busy && sessionActive(), false, () -> {
                 resetStopConfirmation();
                 SuppressionManager.instance().handleWorldAction(client());
                 client().gui.setScreen(null);
-            })
-            .action("two_layer.resume")
-            .special().dimensions(sessionX, footerY, sessionWidth, 22)
-            .visibleWhen(() -> SuppressionManager.instance().active())
-            .enabledWhen(() -> !busy).build());
-        stopButton = addRenderableWidget(MapKlussButton.builder(Component.literal("Остановить"), button -> stopBuilding())
-            .action("two_layer.stop")
-            .danger().navigationOrder(1000).dimensions(sessionX + sessionWidth + gap, footerY, stopWidth, 22)
-            .visibleWhen(() -> SuppressionManager.instance().active())
-            .enabledWhen(() -> !busy).build());
-        addRenderableWidget(MapKlussUi.languageButtonAt(this, shell.topBar().right() - 38, shell.topBar().y() + 9));
-    }
-
-    private void addNavigationControls(CompanionUiLayout.Shell shell) {
-        for (int i = 0; i <= CompanionUiLayout.Destination.ACCOUNT.ordinal(); i++) {
-            CompanionUiLayout.Destination destination = CompanionUiLayout.Destination.values()[i];
-            CompanionUiLayout.Rect rect = CompanionUiLayout.navigationButton(shell, i);
-            addRenderableWidget(MapKlussButton.builder(Component.literal(""), button -> openDestination(destination))
-                .action(CompanionActionInventory.navigationAction(destination))
-                .tooltip(CompanionI18n.text(destination.name()))
-                .dimensions(rect.x(), rect.y(), rect.width(), rect.height()).enabledWhen(() -> !busy).build());
-        }
+            });
+        stopButton = layerButton("two_layer.stop", stopConfirmation ? "Подтвердить" : "Остановить", WorkshopIcon.DELETE,
+            part(s.actions(), 1, 2), () -> !busy && sessionActive(), false, this::stopBuilding);
     }
 
     private void openDestination(CompanionUiLayout.Destination destination) {
         switch (destination) {
             case LIBRARY -> client().gui.setScreen(new CompanionLibraryScreen(parent));
-            case LENS -> client().gui.setScreen(new LensScreen(this));
-            case SCAN -> client().gui.setScreen(new ScanScreen(this));
-            case TRACKER -> client().gui.setScreen(new TrackerOpenScreen(this));
-            case ACCOUNT -> client().gui.setScreen(new CompanionAccountScreen(this));
+            case LENS -> client().gui.setScreen(new LensScreen(this, fixture));
+            case SCAN -> client().gui.setScreen(new ScanScreen(this, fixture));
+            case TRACKER -> client().gui.setScreen(new TrackerOpenScreen(this, fixture));
+            case ACCOUNT -> client().gui.setScreen(new CompanionAccountScreen(this, fixture));
             default -> { }
         }
     }
 
     private void startCloud() {
-        if (manifest == null || !manifest.hasSuppressionBundle() || busy) return;
+        if (manifest == null || !manifest.hasSuppressionBundle() || busy || SuppressionManager.instance().active()) return;
         resetStopConfirmation();
         busy = true;
         status = "Загрузка плана…";
@@ -118,7 +178,7 @@ public final class SuppressionStartScreen extends Screen {
     }
 
     private void chooseLocalZip() {
-        if (busy) return;
+        if (busy || SuppressionManager.instance().active()) return;
         resetStopConfirmation();
         busy = true;
         status = "Выберите ZIP из MapKluss.";
@@ -171,7 +231,7 @@ public final class SuppressionStartScreen extends Screen {
             client().gui.setScreen(null);
         } catch (Exception error) {
             busy = false;
-            status = "Не удалось начать: " + readableError(error);
+            status = SuppressionManager.startFailureMessage(error);
         }
     }
 
@@ -190,7 +250,7 @@ public final class SuppressionStartScreen extends Screen {
         status = "Подготовка схемы…";
         CompletableFuture.runAsync(() -> {
             try {
-                SuppressionBundleInstaller.Installed installed = SuppressionBundleInstaller.install(client().gameDirectory.toPath(), bundle);
+                SuppressionBundleInstaller.Installed installed = SuppressionBundleInstaller.installCatalog(client().gameDirectory.toPath(), catalog, 0);
                 runOnClient(token, () -> finishStart(bundle, installed));
             } catch (Exception error) {
                 runOnClient(token, () -> {
@@ -202,7 +262,7 @@ public final class SuppressionStartScreen extends Screen {
     }
 
     private void stopBuilding() {
-        if (busy || !SuppressionManager.instance().active()) return;
+        if (busy || !sessionActive()) return;
         if (!stopConfirmation) {
             stopConfirmation = true;
             if (stopButton != null) stopButton.setMessage(Component.literal("Подтвердить"));
@@ -213,6 +273,7 @@ public final class SuppressionStartScreen extends Screen {
             SuppressionManager.instance().stop(client());
             stopConfirmation = false;
             status = "Постройка остановлена.";
+            init();
         } catch (Exception error) {
             stopConfirmation = false;
             if (stopButton != null) stopButton.setMessage(Component.literal("Остановить"));
@@ -227,31 +288,30 @@ public final class SuppressionStartScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
-        ScreenViewModel model = screenModel();
-        CompanionUiLayout.Shell shell = MapKlussUi.drawShell(
-            context, font, width, height, model, false
-        );
-        CompanionUiLayout.Rect panel = taskPanel(shell);
-        MapKlussUi.drawPanelAt(context, panel.x(), panel.right(), panel.y(), panel.bottom());
-        MapKlussUi.drawLeft(context, font, "План строительства", panel.x() + 12, panel.y() + 12,
-            panel.width() - 24, MapKlussUi.WHITE);
-        MapKlussUi.drawSectionAt(context, font, "Источник", panel.x() + 12, panel.width() - 24,
-            panel.y() + 38, 48);
-        int statusTop = panel.y() + 88;
-        int statusBottom = panel.bottom() - 42;
-        MapKlussUi.drawDataStrip(context, panel.x() + 12, panel.right() - 12, statusTop, statusBottom);
-        String visibleStatus = status.isBlank() ? "Выберите источник" : status;
-        if (SuppressionManager.instance().active()) {
-            visibleStatus = "Текущий этап: " + sessionActionLabel();
+        var s = WorkshopTwoLayerLayout.at(width, height);
+        context.fill(0, 0, width, height, 0x99000000);
+        WorkshopChrome.frame(context::fill, s.frame(), workshopTheme);
+        text(context, "Two-layer" + (sessionPreview != null ? " · " + sessionPreview.title()
+            : manifest != null ? " · " + manifest.title() : ""), s.title(), "text-primary");
+        if (s.split() || (sessionPreview != null && showPreview)) {
+            drawPreview(context, sessionPreview, s.preview(), null);
+            if (s.split()) text(context, sessionActionLabel(), s.metadata(), "text-secondary");
         }
-        MapKlussUi.drawWrappedCenteredIn(context, font, visibleStatus, panel.x() + panel.width() / 2,
-            statusTop + Math.max(7, (statusBottom - statusTop) / 2 - 4), panel.width() - 48, 2,
-            MapKlussUi.statusColor(model.statusKind()));
+        if (sessionPreview != null && (s.split() || !showPreview)) {
+            var lines = sessionLines();
+            for (int i = 0; i < lines.size() && (i + 1) * 22 <= s.list().height(); i++) {
+                text(context, lines.get(i), new WorkshopLayout.Rect(s.list().x(), s.list().y() + i * 22,
+                    s.list().width(), 22), i == 0 ? "text-primary" : "text-secondary");
+            }
+        }
+        var footer = new WorkshopLayout.Rect(s.footer().x(), s.footer().y(), s.footer().width() - 36, 20);
+        text(context, status.isBlank() ? (sessionActive() ? sessionActionLabel() : "План строительства") : status,
+            footer, stopConfirmation ? "warning" : busy ? "info" : "text-secondary");
         super.extractRenderState(context, mouseX, mouseY, delta);
     }
 
     private ScreenViewModel screenModel() {
-        boolean active = SuppressionManager.instance().active();
+        boolean active = sessionActive();
         String visibleStatus = active ? sessionActionLabel() : status;
         ScreenViewModel.StatusKind kind = busy
             ? ScreenViewModel.StatusKind.LOADING
@@ -262,13 +322,7 @@ public final class SuppressionStartScreen extends Screen {
         );
     }
 
-    private CompanionUiLayout.Shell workflowShell() {
-        return CompanionUiLayout.shell(width, height, false);
-    }
 
-    private CompanionUiLayout.Rect taskPanel(CompanionUiLayout.Shell shell) {
-        return CompanionUiLayout.focusedPanel(shell.content(), 520, 210);
-    }
 
     @Override
     public void onClose() {
@@ -278,6 +332,8 @@ public final class SuppressionStartScreen extends Screen {
     @Override
     public void removed() {
         requests.detach();
+        if (stopConfirmation) { resetStopConfirmation(); status = ""; }
+        previewTexture.close();
         super.removed();
     }
 
@@ -291,8 +347,8 @@ public final class SuppressionStartScreen extends Screen {
         return Minecraft.getInstance();
     }
 
-    private static String sessionActionLabel() {
-        SuppressionStage stage = SuppressionManager.instance().stage();
+    private String sessionActionLabel() {
+        SuppressionStage stage = fixture ? fixtureStage : SuppressionManager.instance().stage();
         if (stage == null) return "Текущий шаг";
         return switch (stage) {
             case READY_NEXT -> "Дальше";

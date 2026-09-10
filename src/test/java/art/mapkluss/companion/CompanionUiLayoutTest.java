@@ -140,13 +140,15 @@ class CompanionUiLayoutTest {
     }
 
     @Test
-    void libraryAndArtConstructProductionScreenModels() throws IOException {
+    void libraryAndArtUseWorkshopLayouts() throws IOException {
         String production = readProductionSources(
             activeScreenSource("CompanionLibraryScreen.java"),
             activeScreenSource("CompanionArtScreen.java")
         );
-        assertTrue(production.contains("ScreenViewModel.shell("));
-        assertTrue(production.contains("List.of(name)"));
+        assertTrue(production.contains("WorkshopLayout.library(width, height)"));
+        assertTrue(production.contains("WorkshopArtLayout.at(width,height)"));
+        assertEquals(2, count(production, "WorkshopChrome.frame("));
+        assertFalse(production.contains("private void legacyRender("));
     }
 
     @Test
@@ -162,7 +164,7 @@ class CompanionUiLayoutTest {
     }
 
     @Test
-    void everyPrimaryProductionScreenUsesTheSharedScreenModel() throws IOException {
+    void everyPrimaryProductionScreenUsesSharedLayoutOrScreenModel() throws IOException {
         String[] screens = {
             activeScreenSource("CompanionLibraryScreen.java"),
             activeScreenSource("CompanionArtScreen.java"),
@@ -180,7 +182,16 @@ class CompanionUiLayoutTest {
         };
         for (String screen : screens) {
             String source = Files.readString(Path.of(screen));
-            assertTrue(source.contains("ScreenViewModel.shell(") || source.contains("screenModel()"), screen);
+            boolean workshopCollection = source.contains("WorkshopCollectionLayout.at(width,height)")
+                && source.contains("WorkshopChrome.frame(");
+            boolean workshopLens = source.contains("WorkshopLensLayout.at(width, height)") && source.contains("WorkshopChrome.frame(");
+            boolean workshopScan = source.contains("WorkshopScanLayout.at(width, height)") && source.contains("WorkshopChrome.frame(");
+            boolean workshopTracker = source.contains("WorkshopTrackerLayout.at(width,height)") && source.contains("WorkshopChrome.frame(");
+            boolean workshopCore = (source.contains("WorkshopLayout.library(width, height)")
+                || source.contains("WorkshopArtLayout.at(width,height)")
+                || source.contains("WorkshopLayout.account(width,height)"))
+                && source.contains("WorkshopChrome.frame(");
+            assertTrue(workshopCore || workshopCollection || workshopLens || workshopScan || workshopTracker || source.contains("ScreenViewModel.shell(") || source.contains("screenModel()"), screen);
         }
     }
 
@@ -190,19 +201,20 @@ class CompanionUiLayoutTest {
             "src/minecraft262/java/art/mapkluss/companion/LensScreen.java",
             "src/minecraftLegacy/java/art/mapkluss/companion/LensScreen.java"
         );
-        assertEquals(2, count(production, "private void drawLensEmptyState("));
-        assertFalse(production.contains("Math.max(42, work.bottom() - listTop"));
-        assertTrue(production.contains("work.height() < 210 ? 26 : 54"));
+        assertTrue(production.contains("WorkshopLensLayout.at(width, height)"));
+        assertTrue(production.contains("s.list().width() - 8"));
+        assertFalse(production.contains("drawLensEmptyState("));
     }
 
     @Test
-    void accountDetailsRenderBelowTheActionRows() throws IOException {
+    void accountDetailsReplaceActionRows() throws IOException {
         String production = readProductionSources(
             "src/minecraft262/java/art/mapkluss/companion/CompanionAccountScreen.java",
             "src/minecraftLegacy/java/art/mapkluss/companion/CompanionAccountScreen.java"
         );
-        assertEquals(2, count(production, "private int accountActionsY("));
-        assertEquals(2, count(production, "int detailsY = accountActionsY(content) + 116"));
+        assertEquals(2, count(production, "if (detailsVisible) return;"));
+        assertEquals(2, count(production, "int y=shell.preview().y()+8;"));
+        assertFalse(production.contains("private void legacyRender("));
         assertFalse(production.contains("content.y() + Math.min(74"));
     }
 
@@ -274,19 +286,48 @@ class CompanionUiLayoutTest {
             "update.telegram", "update.download", "update.dismiss"
         );
         for (String action : required) {
-            boolean direct = production.contains(".action(\"" + action + "\")");
+            boolean direct = production.contains(".action(\"" + action + "\")")
+                || production.contains("layerButton(\"" + action + "\"")
+                || production.contains("workshopButton(\"" + action + "\"")
+                || production.contains("accountButton(\"" + action + "\"")
+                || production.contains("loginButton(\"" + action + "\"")
+                || libraryArrayActions(production).contains(action);
             boolean dynamicAccountAction = (action.equals("account.login_start") || action.equals("account.logout"))
-                && production.contains(".action(isSignedIn() ? \"account.logout\" : \"account.login_start\")");
+                && production.contains("accountButton(isSignedIn() ? \"account.logout\" : \"account.login_start\"");
             assertTrue(direct || dynamicAccountAction, action);
         }
     }
 
     @Test
-    void everyDeclaredActionIsReachableFromProductionSource() throws IOException {
+    void everyDeclaredActionHasAProductionRegistration() throws IOException {
         String production = readAllProductionSources();
         Set<String> reachable = new HashSet<>();
+        reachable.addAll(libraryArrayActions(production));
+        Matcher accountButtons = Pattern.compile("(?:accountButton|loginButton)\\(\"([a-z][a-z0-9_]*(?:\\.[a-z0-9_]+)+)\"").matcher(production);
+        while (accountButtons.find()) reachable.add(accountButtons.group(1));
         Matcher direct = Pattern.compile("\\.action\\(\\\"([a-z][a-z0-9_]*(?:\\.[a-z0-9_]+)+)\\\"").matcher(production);
         while (direct.find()) reachable.add(direct.group(1));
+        Matcher workshop = Pattern.compile("workshopButton\\(\"([a-z][a-z0-9_]*(?:\\.[a-z0-9_]+)+)\"").matcher(production);
+        while (workshop.find()) reachable.add(workshop.group(1));
+        Matcher artWorkshop = Pattern.compile("artWorkshopButton\\(\"([a-z][a-z0-9_]*(?:\\.[a-z0-9_]+)+)\"").matcher(production);
+        while (artWorkshop.find()) reachable.add(artWorkshop.group(1));
+        Matcher collections = Pattern.compile("collectionButton\\(\"([a-z][a-z0-9_]*(?:\\.[a-z0-9_]+)+)\"").matcher(production);
+        while (collections.find()) reachable.add(collections.group(1));
+        Matcher lens = Pattern.compile("lensButton\\(\"([a-z][a-z0-9_]*(?:\\.[a-z0-9_]+)+)\"").matcher(production);
+        while (lens.find()) reachable.add(lens.group(1));
+        Matcher layers = Pattern.compile("layerButton\\(\"([a-z][a-z0-9_]*(?:\\.[a-z0-9_]+)+)\"").matcher(production);
+        while (layers.find()) reachable.add(layers.group(1));
+        Matcher scan = Pattern.compile("scanButton\\(\"([a-z][a-z0-9_]*(?:\\.[a-z0-9_]+)+)\"").matcher(production);
+        while (scan.find()) reachable.add(scan.group(1));
+        Matcher tracker = Pattern.compile("trackerButton\\(\"([a-z][a-z0-9_]*(?:\\.[a-z0-9_]+)+)\"").matcher(production);
+        while (tracker.find()) reachable.add(tracker.group(1));
+        Matcher build = Pattern.compile("button\\(\"(tracker\\.(?:build|group)\\.[a-z_]+)\"").matcher(production);
+        while (build.find()) reachable.add(build.group(1));
+        Matcher workshopRows = Pattern.compile("String\\[\\] ids = secondaryActions([\\s\\S]*?);").matcher(production);
+        while (workshopRows.find()) {
+            Matcher id = Pattern.compile("\"(library\\.[a-z_]+|global\\.[a-z_]+)\"").matcher(workshopRows.group(1));
+            while (id.find()) reachable.add(id.group(1));
+        }
 
         // These commands use runtime state or a destination enum instead of a fixed literal.
         reachable.addAll(Set.of(
@@ -304,6 +345,16 @@ class CompanionUiLayoutTest {
         assertEquals(Set.of(), reachable.stream()
             .filter(action -> !CompanionActionInventory.contains(action))
             .collect(java.util.stream.Collectors.toSet()));
+    }
+
+    private static Set<String> libraryArrayActions(String source) {
+        Set<String> actions = new HashSet<>();
+        Matcher arrays = Pattern.compile("String\\[\\] ids = (?:secondaryActions[\\s\\S]*?|\\{[^;]*?\\});").matcher(source);
+        while (arrays.find()) {
+            Matcher ids = Pattern.compile("\"(library\\.[a-z_]+|global\\.[a-z_]+)\"").matcher(arrays.group());
+            while (ids.find()) actions.add(ids.group(1));
+        }
+        return actions;
     }
 
     private static String readProductionSources(String... paths) throws IOException {

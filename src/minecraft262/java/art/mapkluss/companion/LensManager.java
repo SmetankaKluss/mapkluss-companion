@@ -164,6 +164,11 @@ public final class LensManager {
         nextSessionListAt = 0;
     }
 
+    net.minecraft.resources.Identifier previewAtlas(String sessionId, long revision) {
+        LensTextureAtlas atlas = atlases.get(sessionId);
+        return atlas != null && atlas.readyFor(revision) ? atlas.identifier() : null;
+    }
+
     public void screenClosed() {
         screenOpen = false;
     }
@@ -221,6 +226,34 @@ public final class LensManager {
         });
     }
 
+    private final java.util.concurrent.atomic.AtomicBoolean cloudStarting=new java.util.concurrent.atomic.AtomicBoolean();
+    public void startCloud(Minecraft client,String art,String version){
+        if(!cloudStarting.compareAndSet(false,true))return;
+        status=CompanionI18n.english(client)?"Starting Lens...":"Запускаю Lens...";
+        long generation=worldGeneration.get();
+        CompletableFuture.runAsync(()->{
+            try{
+                var runtime=CompanionRuntime.create(client);
+                var lens=api(client);
+                var manifest=runtime.apiClient().manifest(art,version);
+                if(!java.util.Objects.equals(runtime.sessionStore().userId(),manifest.ownerId()))throw new java.io.IOException("Only your own art can start Lens");
+                var preview=LensCloudSource.preview(runtime.apiClient(),manifest);
+                if(generation!=worldGeneration.get())return;
+                var session=lens.start(manifest,preview);
+                LensCloudSource.save(client.gameDirectory.toPath(),session.sessionId(),manifest);
+                client.execute(()->{
+                    if(generation!=worldGeneration.get())return;
+                    acceptSession(session);nextPollAt=0;
+                    status=CompanionI18n.english(client)?"Lens ready":"Lens запущен";
+                });
+            }catch(Exception error){setError(client,"Не удалось запустить Lens",error,generation,null);}
+            finally{cloudStarting.set(false);}
+        });
+    }
+    public void openCloudEditor(Minecraft client,String session){
+        try{net.minecraft.util.Util.getPlatform().openUri(LensCloudSource.editor(CompanionConfig.load(client.gameDirectory.toPath()),client.gameDirectory.toPath(),session));}
+        catch(Exception error){status=CompanionI18n.english(client)?"This session has no Cloud art link":"У этой сессии нет связи с Cloud-артом";}
+    }
     public void join(Minecraft client, String sessionCode) {
         String code = sessionCode == null ? "" : sessionCode.trim().toUpperCase();
         if (code.isBlank()) {
@@ -270,6 +303,11 @@ public final class LensManager {
         LensDtos.Session session = sessions.get(sessionId);
         if (session == null) {
             status = CompanionI18n.translate("Сначала выберите сессию Lens");
+            placementMutation.set(false);
+            return;
+        }
+        if (session.revision() < 1 || session.previewWidth() < 1 || session.previewHeight() < 1) {
+            status = CompanionI18n.translate("Lens ещё публикует первое превью");
             placementMutation.set(false);
             return;
         }
@@ -468,7 +506,9 @@ public final class LensManager {
         throws IOException, InterruptedException {
         LensTextureAtlas atlas = atlases.get(sessionId);
         long knownRevision = atlas == null ? 0 : Math.max(0, atlas.revision());
-        LensDtos.PollResult result = api.poll(sessionId, knownRevision, serverHash, dimensionId);
+        LensDtos.Session knownSession = sessions.get(sessionId);
+        boolean needsPreview = atlas == null || knownSession == null || !atlas.readyFor(knownSession.revision());
+        LensDtos.PollResult result = api.poll(sessionId, knownRevision, needsPreview, serverHash, dimensionId);
         client.execute(() -> {
             if (generation != worldGeneration.get() || !recoveryGate.isLatest(recovery) || result.session() == null) return;
             LensDtos.Session current = sessions.get(sessionId);
@@ -493,15 +533,25 @@ public final class LensManager {
             if (returnedPlacementIds.isEmpty()) {
                 LensTextureAtlas unused = atlases.remove(sessionId);
                 if (unused != null) unused.close();
-            } else if (result.changed()) {
+            } else {
                 LensTextureAtlas targetAtlas = atlases.computeIfAbsent(sessionId, LensTextureAtlas::new);
-                if (!LensStateLogic.acceptsRevision(targetAtlas.revision(), result.session().revision())) return;
-                targetAtlas.request(
-                    result.signedPreviewUrl(), result.session().revision(),
-                    result.session().previewWidth(), result.session().previewHeight()
+                boolean downloadPreview = LensStateLogic.needsPreviewDownload(
+                    result.changed(), targetAtlas.readyFor(result.session().revision()), result.session().revision()
                 );
+                if (downloadPreview) {
+                    if (result.signedPreviewUrl() == null || result.signedPreviewUrl().isBlank()) {
+                        status = CompanionI18n.translate("Lens ожидает первое превью из редактора");
+                    } else {
+                        targetAtlas.request(
+                            result.signedPreviewUrl(), result.session().revision(),
+                            result.session().previewWidth(), result.session().previewHeight()
+                        );
+                        status = CompanionI18n.translate("Ревизия Lens") + " " + result.session().revision();
+                    }
+                } else {
+                    status = CompanionI18n.translate("Ревизия Lens") + " " + result.session().revision();
+                }
             }
-            status = CompanionI18n.translate("Ревизия Lens") + " " + result.session().revision();
         });
     }
 

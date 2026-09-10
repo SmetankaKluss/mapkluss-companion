@@ -8,7 +8,6 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
-import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.Vec3;
@@ -23,6 +22,8 @@ public final class LensRenderBridge {
     }
 
     public static void register(LensManager manager) {
+        try { WorkshopHudTheme.select(CompanionConfig.load(Minecraft.getInstance().gameDirectory.toPath()).theme()); }
+        catch (Exception ignored) { }
         ClientTickEvents.END_CLIENT_TICK.register(manager::tick);
         ClientTickEvents.END_CLIENT_TICK.register(SuppressionManager.instance()::tick);
         LevelRenderEvents.COLLECT_SUBMITS.register(context -> {
@@ -42,7 +43,6 @@ public final class LensRenderBridge {
             }
         });
         HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(MapKlussCompanionClient.MOD_ID, "lens_hud"), (context, tickCounter) -> {
-            renderHud(context, manager);
             renderSuppressionHud(context);
         });
     }
@@ -58,7 +58,7 @@ public final class LensRenderBridge {
                 }
             }
             if (!visibleArt.isEmpty()) {
-                submits.submitCustomGeometry(matrices, RenderTypes.entityCutout(snapshot.atlas()), (pose, vertices) -> {
+                submits.submitCustomGeometry(matrices, RenderTypes.text(snapshot.atlas()), (pose, vertices) -> {
                     for (LensRenderSnapshot.Cell cell : visibleArt) {
                         texturedQuad(vertices, pose, LensQuadGeometry.quad(cell.blockPos(), snapshot.facing()), cell);
                     }
@@ -84,18 +84,15 @@ public final class LensRenderBridge {
     }
 
     private static void texturedQuad(VertexConsumer vertices, PoseStack.Pose pose, LensQuadGeometry.Quad quad, LensRenderSnapshot.Cell cell) {
-        float nx = quad.normal().getStepX();
-        float ny = quad.normal().getStepY();
-        float nz = quad.normal().getStepZ();
-        vertex(vertices, pose, quad.bottomLeft(), cell.minU(), cell.maxV(), nx, ny, nz);
-        vertex(vertices, pose, quad.bottomRight(), cell.maxU(), cell.maxV(), nx, ny, nz);
-        vertex(vertices, pose, quad.topRight(), cell.maxU(), cell.minV(), nx, ny, nz);
-        vertex(vertices, pose, quad.topLeft(), cell.minU(), cell.minV(), nx, ny, nz);
+        vertex(vertices, pose, quad.bottomLeft(), cell.minU(), cell.maxV());
+        vertex(vertices, pose, quad.bottomRight(), cell.maxU(), cell.maxV());
+        vertex(vertices, pose, quad.topRight(), cell.maxU(), cell.minV());
+        vertex(vertices, pose, quad.topLeft(), cell.minU(), cell.minV());
     }
 
-    private static void vertex(VertexConsumer vertices, PoseStack.Pose pose, Vec3 point, float u, float v, float nx, float ny, float nz) {
+    private static void vertex(VertexConsumer vertices, PoseStack.Pose pose, Vec3 point, float u, float v) {
         vertices.addVertex(pose, (float) point.x, (float) point.y, (float) point.z)
-            .setColor(255, 255, 255, 255).setUv(u, v).setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULL_LIGHT).setNormal(nx, ny, nz);
+            .setColor(255, 255, 255, 255).setUv(u, v).setLight(FULL_LIGHT);
     }
 
     private static void outline(VertexConsumer vertices, PoseStack.Pose pose, LensQuadGeometry.Quad quad, Direction normal, int r, int g, int b, int a) {
@@ -182,38 +179,11 @@ public final class LensRenderBridge {
         line(lines, pose, p101, p111, Direction.UP, r, g, b, a); line(lines, pose, p001, p011, Direction.UP, r, g, b, a);
     }
 
-    private static void renderHud(GuiGraphicsExtractor context, LensManager manager) {
-        java.util.List<LensRenderSnapshot> snapshots = manager.renderSnapshots();
-        if (Minecraft.getInstance().gui.hud.isHidden() || snapshots.isEmpty()) return;
-        int valid = 0;
-        int total = 0;
-        long revision = 0;
-        for (LensRenderSnapshot snapshot : snapshots) {
-            revision = Math.max(revision, snapshot.revision());
-            total += snapshot.cellCount();
-            valid += snapshot.frameCount();
-        }
-        String label = "Lens r" + revision + "  " + CompanionI18n.translate("рамки") + " " + valid + "/" + total
-            + "  WS" + manager.realtimeWakeupCount() + "/P" + manager.fallbackPollCount()
-            + "·" + manager.lastRecoverySource().substring(0, 1).toUpperCase(java.util.Locale.ROOT);
-        context.fill(5, 5, 13 + Minecraft.getInstance().font.width(label), 19, 0xA0000000);
-        context.text(Minecraft.getInstance().font, label, 9, 8, 0xFF8CFF9A);
-    }
-
     private static void renderSuppressionHud(GuiGraphicsExtractor context) {
         Minecraft client = Minecraft.getInstance();
         java.util.List<String> lines = SuppressionManager.instance().hudLines();
         if (client.gui.hud.isHidden() || lines.isEmpty()) return;
-        int measured = lines.stream().mapToInt(client.font::width).max().orElse(0);
-        SuppressionHudLayout.Layout layout = SuppressionHudLayout.calculate(
-            client.getWindow().getGuiScaledWidth(), client.getWindow().getGuiScaledHeight(), measured, lines.size());
-        context.fill(layout.x(), layout.y(), layout.x() + layout.width(), layout.y() + layout.height(), 0xE0101018);
-        context.fill(layout.x(), layout.y(), layout.x() + layout.width(), layout.y() + 2, 0xFF57FF6E);
-        for (int index = 0; index < Math.min(4, lines.size()); index++) {
-            String line = client.font.plainSubstrByWidth(lines.get(index), layout.contentWidth());
-            context.text(client.font, line, layout.x() + 6, layout.y() + 5 + index * 11,
-                index == 0 ? 0xFF57FF6E : index == 1 ? 0xFFD9C27A : 0xFFECECEC);
-        }
+        WorkshopHudDraw.twoLayer(context, lines);
     }
 
 }

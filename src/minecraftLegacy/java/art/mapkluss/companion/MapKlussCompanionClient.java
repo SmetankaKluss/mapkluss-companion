@@ -17,7 +17,10 @@ public final class MapKlussCompanionClient implements ClientModInitializer {
         AutoFrameBridge.register(AutoFrameManager.instance());
         CompanionTelemetryManager.register();
         CompanionUpdateManager.register();
+        LiveBuildClient.register();
         registerDevelopmentUiLab();
+        registerDevelopmentLibraryHarness();
+        registerDevelopmentControlDesk();
         LOGGER.info("MapKluss Companion initialized for Fabric client. UI build: {}.", UI_BUILD);
     }
 
@@ -31,6 +34,32 @@ public final class MapKlussCompanionClient implements ClientModInitializer {
             LOGGER.debug("MapKluss UI Lab is not enabled for this development run.");
         } catch (ReflectiveOperationException error) {
             LOGGER.warn("Could not initialize MapKluss UI Lab.", error);
+        }
+    }
+
+    private static void registerDevelopmentLibraryHarness() {
+        if (!FabricLoader.getInstance().isDevelopmentEnvironment()) return;
+        try {
+            Class.forName("art.mapkluss.companion.MapKlussLibraryHarness")
+                .getMethod("register")
+                .invoke(null);
+        } catch (ClassNotFoundException ignored) {
+            LOGGER.debug("MapKluss Library harness is not enabled for this development run.");
+        } catch (ReflectiveOperationException error) {
+            LOGGER.warn("Could not initialize the MapKluss Library harness.", error);
+        }
+    }
+
+    private static void registerDevelopmentControlDesk() {
+        if (!FabricLoader.getInstance().isDevelopmentEnvironment()) return;
+        try {
+            Class.forName("art.mapkluss.companion.MapKlussControlDesk")
+                .getMethod("register")
+                .invoke(null);
+        } catch (ClassNotFoundException ignored) {
+            LOGGER.debug("MapKluss Control Desk is not enabled for this development run.");
+        } catch (ReflectiveOperationException error) {
+            LOGGER.warn("Could not initialize the MapKluss Control Desk.", error);
         }
     }
 }

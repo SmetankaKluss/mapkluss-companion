@@ -26,197 +26,260 @@ public final class LensScreen extends Screen {
     private int sessionPage;
     private int placementPage;
 
-    public LensScreen(Screen parent) {
+
+    private final boolean fixture;
+    private boolean opened;
+    private boolean fixtureApplied;
+    private boolean showPreview;
+    private WorkshopTheme workshopTheme = WorkshopTheme.of(WorkshopTheme.DEFAULT_ID);
+    private List<LensDtos.Session> fixtureSessions = List.of();
+    private List<LensDtos.Placement> fixturePlacements = List.of();
+    private String fixtureStatus = "";
+
+    public LensScreen(Screen parent) { this(parent, false); }
+
+    LensScreen(Screen parent, boolean fixture) {
         super(Component.literal("MapKluss Lens"));
         this.parent = parent;
+        this.fixture = fixture;
     }
+
+    void applyDevelopmentData(List<LensDtos.Session> sessions, List<LensDtos.Placement> placements, String status) {
+        if (!fixture) return;
+        fixtureSessions = List.copyOf(sessions);
+        fixturePlacements = List.copyOf(placements);
+        fixtureStatus = status;
+    }
+
+    private List<LensDtos.Session> sessions() { return fixture ? fixtureSessions : manager.sessions(); }
+    private List<LensDtos.Placement> placements() { return fixture ? fixturePlacements : manager.placements(); }
+    private String status() { return fixture ? fixtureStatus : manager.status(); }
 
     @Override
     protected void init() {
-        manager.screenOpened();
+        if (fixture && !fixtureApplied) {
+            fixtureApplied = true;
+            try {
+                Class.forName("art.mapkluss.companion.CompanionLibraryDevFixture")
+                    .getMethod("applyLens", Object.class).invoke(null, this);
+            } catch (ReflectiveOperationException ignored) { }
+        }
+        if (!fixture && !opened) {
+            opened = true;
+            manager.screenOpened();
+            manager.refreshSessions(client());
+        }
         rebuildControls();
-        manager.refreshSessions(client());
     }
 
     @Override
     public void removed() {
-        manager.screenClosed();
+        rememberCode();
+        deleteConfirmation.reset();
+        if (opened) { manager.screenClosed(); opened = false; }
         super.removed();
+    }
+
+    @Override
+    public void onClose() {
+        deleteConfirmation.reset();
+        client().gui.setScreen(parent);
     }
 
     @Override
     public void tick() {
         super.tick();
         String next = fingerprint();
-        if (!next.equals(fingerprint) && (codeInput == null || !codeInput.isFocused())) {
-            rememberCode();
-            rebuildControls();
-        }
+        if (!next.equals(fingerprint) && (codeInput == null || !codeInput.isFocused())) rebuildControls();
+    }
+
+    private MapKlussButton lensButton(String id, String label, WorkshopIcon icon, WorkshopLayout.Rect r,
+        boolean enabled, boolean selected, boolean local, Runnable action) {
+        var builder = MapKlussButton.builder(CompanionI18n.text(label), button -> {
+            if (enabled && (!fixture || local) && LensUiPermissions.allowed(id, selectedSession(), selectedPlacement(), ownsSelectedPlacement())) action.run();
+        }).action(id).tooltip(CompanionI18n.text(label)).selected(selected)
+            .dimensions(r.x(), r.y(), r.width(), r.height()).enabledWhen(() -> enabled && (!fixture || local)
+                && LensUiPermissions.allowed(id, selectedSession(), selectedPlacement(), ownsSelectedPlacement()));
+        if (id.equals("lens.place")) builder.gold();
+        if (id.equals("lens.remove_placement") || id.equals("lens.report")) builder.danger();
+        return addRenderableWidget(builder.build().workshop(workshopTheme, icon));
+    }
+
+    private WorkshopLayout.Rect part(WorkshopLayout.Rect r, int index, int count) {
+        int w = (r.width() - (count - 1) * 4) / count;
+        return new WorkshopLayout.Rect(r.x() + index * (w + 4), r.y(), w, r.height());
     }
 
     private void rebuildControls() {
+        rememberCode();
         clearWidgets();
+        codeInput = null;
         deleteButton = null;
-        CompanionUiLayout.Shell shell = lensShell();
-        CompanionUiLayout.Rect work = lensWork(shell);
-        int panelWidth = work.width();
-        int left = work.x();
-        int gap = 6;
-        int inputY = joinY(work);
-        int tabsY = tabsY(work);
-
-        int joinWidth = Math.min(112, Math.max(84, panelWidth / 4));
-        int refreshWidth = Math.min(72, Math.max(54, panelWidth / 7));
-        int codeWidth = Math.max(76, panelWidth - joinWidth - refreshWidth - gap * 2);
-        codeInput = new EditBox(font, left, inputY, codeWidth, 22, CompanionI18n.text("Код Lens"));
-        codeInput.setMaxLength(20);
-        codeInput.setValue(code);
-        addRenderableWidget(codeInput);
-        addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Войти по коду"), button -> {
-                rememberCode();
-                manager.join(client(), code);
-            }).action("lens.join").selected(true).dimensions(left + codeWidth + gap, inputY, joinWidth, 22).build());
-        addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Обновить"), button -> manager.refreshSessions(client()))
-            .action("lens.refresh")
-            .technical().dimensions(left + codeWidth + joinWidth + gap * 2, inputY, refreshWidth, 22).build());
-
-        int half = Math.max(80, (panelWidth - gap) / 2);
-        addRenderableWidget(MapKlussButton.builder(Component.literal(sessionTabLabel()), button -> openOrAdvance(false))
-            .action("lens.next_session_page")
-            .selected(!placementsTab).dimensions(left, tabsY, half, 22).build());
-        addRenderableWidget(MapKlussButton.builder(Component.literal(placementTabLabel()), button -> openOrAdvance(true))
-            .action("lens.next_placement_page")
-            .selected(placementsTab).dimensions(left + half + gap, tabsY, panelWidth - half - gap, 22).build());
-
+        try { workshopTheme = WorkshopTheme.of(CompanionConfig.load(client().gameDirectory.toPath()).theme()); }
+        catch (Exception ignored) { }
         reconcileSelection();
-        if (placementsTab) {
-            addPlacementControls(left, panelWidth);
-        } else {
-            addSessionControls(left, panelWidth);
+        var s = WorkshopLensLayout.at(width, height);
+        int slots = (s.navigation().width() - 60) / 5;
+        WorkshopIcon[] icons = {WorkshopIcon.LIBRARY, WorkshopIcon.LENS, WorkshopIcon.SCAN, WorkshopIcon.TRACKER, WorkshopIcon.ACCOUNT};
+        for (int i = 0; i < 5; i++) {
+            var d = CompanionUiLayout.Destination.values()[i];
+            lensButton(CompanionActionInventory.navigationAction(d), destinationLabel(d), icons[i],
+                new WorkshopLayout.Rect(s.navigation().x() + i * slots, s.navigation().y(), slots - 4, 28),
+                true, d == CompanionUiLayout.Destination.LENS, true, () -> openDestination(d));
         }
+        lensButton("account.theme", "Оформление", WorkshopIcon.LAYERS,
+            new WorkshopLayout.Rect(s.navigation().right() - 56, s.navigation().y(), 24, 28), true, false, true,
+            () -> client().gui.setScreen(new WorkshopAppearanceScreen(this)));
+        lensButton("global.back", "Назад", WorkshopIcon.BACK,
+            new WorkshopLayout.Rect(s.navigation().right() - 24, s.navigation().y(), 24, 28), true, false, true, this::onClose);
+        lensButton("global.language", CompanionI18n.toggleLabel(client()), null,
+            new WorkshopLayout.Rect(s.status().right() - 68, s.status().y(), 32, 20), true, false, true, () -> {
+                try { CompanionI18n.toggle(client()); rebuildControls(); } catch (Exception ignored) { }
+            });
+        lensButton("lens.refresh", "Обновить", WorkshopIcon.REFRESH,
+            new WorkshopLayout.Rect(s.status().right() - 32, s.status().y(), 32, 20), true, false, false,
+            () -> manager.refreshSessions(client()));
 
-        addNavigationControls(shell);
-        addRenderableWidget(MapKlussUi.languageButtonAt(this, shell.topBar().right() - 38, shell.topBar().y() + 9));
-        setFocused(null);
-        codeInput.setFocused(false);
+        if (!s.split()) lensButton("lens.preview", showPreview ? "Сессии" : "Превью", WorkshopIcon.LENS,
+            new WorkshopLayout.Rect(s.footer().right() - 28, s.footer().y(), 28, 20), true, showPreview, true, () -> {
+                showPreview = !showPreview; rebuildControls();
+            });
+
+        if (s.split() || !showPreview) {
+            var join = s.join();
+            codeInput = new EditBox(font, join.x(), join.y(), join.width() - 32, 24, CompanionI18n.text("Код Lens"));
+            codeInput.setMaxLength(20);
+            codeInput.setHint(CompanionI18n.text("Код Lens"));
+            codeInput.setValue(code);
+            codeInput.setResponder(value -> code = value);
+            addRenderableWidget(codeInput);
+            lensButton("lens.join", "Войти по коду", WorkshopIcon.LINK,
+                new WorkshopLayout.Rect(join.right() - 28, join.y(), 28, 24), true, false, false,
+                () -> { rememberCode(); manager.join(client(), code); });
+
+            sessionPage = clampPage(sessionPage, sessions().size(), s.rows());
+            placementPage = clampPage(placementPage, placements().size(), s.rows());
+            lensButton("lens.next_session_page", sessionTabLabel(), WorkshopIcon.LENS, part(s.tabs(), 0, 2),
+                true, !placementsTab, true, () -> openOrAdvance(false));
+            lensButton("lens.next_placement_page", placementTabLabel(), WorkshopIcon.LAYERS, part(s.tabs(), 1, 2),
+                true, placementsTab, true, () -> openOrAdvance(true));
+            if (placementsTab) addPlacementControls(s); else addSessionControls(s);
+            lensButton("lens.visibility_private", "Личное", WorkshopIcon.ACCOUNT, part(s.visibility(), 0, 2),
+                !placementsTab, displayedVisibility().equals("personal"), true, () -> { visibility = "personal"; rebuildControls(); });
+            lensButton("lens.visibility_group", "Группа", WorkshopIcon.LINK, part(s.visibility(), 1, 2),
+                !placementsTab, displayedVisibility().equals("group"), true, () -> { visibility = "group"; rebuildControls(); });
+        }
+        addActions(s.actions());
         fingerprint = fingerprint();
     }
 
-    private void addSessionControls(int left, int panelWidth) {
-        CompanionUiLayout.Rect work = lensWork(lensShell());
-        int listY = listY(work);
-        int gap = 6;
-        boolean compact = work.height() < 210;
-        int controlsY = work.bottom() - (compact ? 22 : 48);
-        int rows = Math.max(0, Math.min(5, (controlsY - listY - 6) / ROW_HEIGHT));
-        int pageSize = CompanionLayout.pageSize(rows);
-        List<LensDtos.Session> sessions = manager.sessions();
-        sessionPage = clampPage(sessionPage, sessions.size(), pageSize);
-        int start = sessionPage * pageSize;
-        int end = Math.min(start + rows, sessions.size());
-        for (int i = start; i < end; i++) {
-            LensDtos.Session session = sessions.get(i);
-            int rowY = listY + (i - start) * ROW_HEIGHT;
-            String label = session.title() + "  r" + session.revision() + "  " + session.grid().wide() + "x" + session.grid().tall();
-            int leaveWidth = 68;
-            addRenderableWidget(MapKlussButton.builder(Component.literal(label), button -> {
-                    rememberCode();
-                    selectedSessionId = session.sessionId();
-                    deleteConfirmation.reset();
-                    rebuildControls();
-                }).action("lens.select_session").selected(session.sessionId().equals(selectedSessionId))
-                .tooltip(Component.literal(label))
-                .dimensions(left, rowY, panelWidth - leaveWidth - gap, 20).build());
-            MapKlussButton leave = MapKlussButton.builder(CompanionI18n.text("Выйти"), button -> manager.leave(client(), session.sessionId()))
-                .action("lens.leave")
-                .danger().tooltip(CompanionI18n.text(session.ownedByUser() ? "Личную сессию закрывают в редакторе" : "Выйти из группы Lens"))
-                .dimensions(left + panelWidth - leaveWidth, rowY, leaveWidth, 20).build();
-            leave.active = !session.ownedByUser();
-            addRenderableWidget(leave);
+    private void addSessionControls(WorkshopLensLayout.Layout layout) {
+        int start = sessionPage * layout.rows();
+        var sessions = sessions();
+        for (int i = start; i < Math.min(sessions.size(), start + layout.rows()); i++) {
+            var session = sessions.get(i);
+            lensButton("lens.select_session", session.title(), WorkshopIcon.LENS, layout.row(i - start),
+                true, session.sessionId().equals(selectedSessionId), true, () -> {
+                    selectedSessionId = session.sessionId(); deleteConfirmation.reset(); rebuildControls();
+                });
         }
-
-        if (compact) {
-            int visibilityWidth = Math.max(64, panelWidth / 3);
-            addRenderableWidget(MapKlussButton.builder(Component.literal(CompanionI18n.translate("Режим: ") + visibilityLabel(visibility)), button -> {
-                    visibility = "personal".equals(visibility) ? "group" : "personal";
-                    rebuildControls();
-                }).action("lens.visibility_group").dimensions(left, controlsY, visibilityWidth, 22).build());
-            LensDtos.Session selected = selectedSession();
-            addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Закрепить по рамке"), button ->
-                    manager.anchorTarget(client(), selectedSessionId, visibility))
-                .action("lens.place").special().tooltip(CompanionI18n.text(selected == null ? "Сначала выберите сессию Lens" : "Закрепить по угловой рамке"))
-                .dimensions(left + visibilityWidth + gap, controlsY, panelWidth - visibilityWidth - gap, 22)
-                .enabledWhen(() -> selectedSession() != null && selectedSession().ownedByUser()).build());
-            return;
-        }
-        int half = Math.max(80, (panelWidth - gap) / 2);
-        addVisibilityButton(left, controlsY, half, "personal", "Личное");
-        addVisibilityButton(left + half + gap, controlsY, panelWidth - half - gap, "group", "Группа");
-        LensDtos.Session selected = selectedSession();
-        addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Закрепить по угловой рамке"), button ->
-                manager.anchorTarget(client(), selectedSessionId, visibility))
-            .action("lens.place").special()
-            .tooltip(CompanionI18n.text(selected == null ? "Сначала выберите сессию Lens" : "Закрепить по угловой рамке"))
-            .dimensions(left, controlsY + 26, panelWidth, 22)
-            .enabledWhen(() -> selectedSession() != null && selectedSession().ownedByUser())
-            .build());
     }
 
-    private void addPlacementControls(int left, int panelWidth) {
-        CompanionUiLayout.Rect work = lensWork(lensShell());
-        int listY = listY(work);
-        int gap = 6;
-        int actionsY = work.bottom() - 22;
-        int rows = Math.max(0, Math.min(6, (actionsY - listY - 6) / ROW_HEIGHT));
-        int pageSize = CompanionLayout.pageSize(rows);
-        List<LensDtos.Placement> placements = manager.placements();
-        placementPage = clampPage(placementPage, placements.size(), pageSize);
-        int start = placementPage * pageSize;
-        int end = Math.min(start + rows, placements.size());
-        for (int i = start; i < end; i++) {
-            LensDtos.Placement placement = placements.get(i);
-            int rowY = listY + (i - start) * ROW_HEIGHT;
-            String label = placement.title() + "  " + visibilityLabel(placement.visibility()) + "  r" + placement.revision();
-            addRenderableWidget(MapKlussButton.builder(Component.literal(label), button -> {
-                    rememberCode();
-                    selectedPlacementId = placement.placementId();
-                    deleteConfirmation.reset();
-                    rebuildControls();
-                }).action("lens.select_placement").selected(placement.placementId().equals(selectedPlacementId))
-                .tooltip(Component.literal(label))
-                .dimensions(left, rowY, panelWidth, 20).build());
+    private void addPlacementControls(WorkshopLensLayout.Layout layout) {
+        int start = placementPage * layout.rows();
+        var placements = placements();
+        for (int i = start; i < Math.min(placements.size(), start + layout.rows()); i++) {
+            var placement = placements.get(i);
+            lensButton("lens.select_placement", placement.title(), WorkshopIcon.LAYERS, layout.row(i - start),
+                true, placement.placementId().equals(selectedPlacementId), true, () -> {
+                    selectedPlacementId = placement.placementId(); deleteConfirmation.reset(); rebuildControls();
+                });
         }
-
-        int actionWidth = Math.max(54, (panelWidth - gap * 3) / 4);
-        LensDtos.Placement selected = selectedPlacement();
-        boolean ownPlacement = selected != null && ownsSession(selected.sessionId());
-        addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Скрыть"), button -> manager.hidePlacement(selectedPlacementId))
-            .action("lens.hide_placement")
-            .tooltip(CompanionI18n.text(selected == null ? "Сначала выберите размещение Lens" : "Скрыть размещение локально"))
-            .dimensions(left, actionsY, actionWidth, 20)
-            .enabledWhen(() -> selectedPlacement() != null && !ownsSelectedPlacement())
-            .build());
-        addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Скрыть автора"), button -> {
-                LensDtos.Placement placement = selectedPlacement();
-                if (placement != null) manager.blockOwner(placement.ownerKey());
-            }).action("lens.hide_author").tooltip(CompanionI18n.text(selected == null ? "Сначала выберите размещение Lens" : "Скрыть все размещения этого автора локально"))
-            .dimensions(left + actionWidth + gap, actionsY, actionWidth, 20)
-            .enabledWhen(() -> selectedPlacement() != null && !ownsSelectedPlacement())
-            .build());
-        addRenderableWidget(MapKlussButton.builder(CompanionI18n.text("Жалоба"), button -> manager.reportPlacement(client(), selectedPlacement(), "other"))
-            .action("lens.report")
-            .danger().tooltip(CompanionI18n.text(selected == null ? "Сначала выберите размещение Lens" : "Отправить жалобу и скрыть размещение"))
-            .dimensions(left + (actionWidth + gap) * 2, actionsY, actionWidth, 20).navigationOrder(900)
-            .enabledWhen(() -> selectedPlacement() != null && !ownsSelectedPlacement())
-            .build());
-        deleteButton = addRenderableWidget(MapKlussButton.builder(Component.literal(deleteConfirmation.armed() ? "Подтвердить удаление" : "Удалить"), button -> deleteSelectedPlacement())
-            .action("lens.remove_placement")
-            .danger().tooltip(CompanionI18n.text("Удалить своё размещение Lens"))
-            .dimensions(left + (actionWidth + gap) * 3, actionsY, panelWidth - (actionWidth + gap) * 3, 20).navigationOrder(1000)
-            .enabledWhen(() -> selectedPlacement() != null && selectedPlacement().ownedByDevice())
-            .build());
     }
 
+    private void addActions(WorkshopLayout.Rect r) {
+        if (!placementsTab) {
+            var selected = selectedSession();
+            lensButton("lens.place", "Закрепить по рамке", WorkshopIcon.INSTALL, part(r, 0, 2),
+                selected != null && selected.ownedByUser(), false, false,
+                () -> manager.anchorTarget(client(), selectedSessionId, visibility));
+            if (selected != null && selected.ownedByUser()) {
+                lensButton("lens.open_editor", "Редактор", WorkshopIcon.LINK, part(r, 1, 2),
+                    true, false, false, () -> manager.openCloudEditor(client(), selectedSessionId));
+            } else {
+                lensButton("lens.leave", "Выйти", WorkshopIcon.LINK, part(r, 1, 2),
+                    selected != null, false, false, () -> manager.leave(client(), selectedSessionId));
+            }
+        } else {
+            boolean selected = selectedPlacement() != null;
+            boolean other = selected && !ownsSelectedPlacement();
+            lensButton("lens.hide_placement", "Скрыть", WorkshopIcon.CLOSE, part(r, 0, 4), other, false, false,
+                () -> manager.hidePlacement(selectedPlacementId));
+            lensButton("lens.hide_author", "Скрыть автора", WorkshopIcon.ACCOUNT, part(r, 1, 4), other, false, false,
+                () -> { var p = selectedPlacement(); if (p != null) manager.blockOwner(p.ownerKey()); });
+            lensButton("lens.report", "Жалоба", WorkshopIcon.MORE, part(r, 2, 4), other, false, false,
+                () -> manager.reportPlacement(client(), selectedPlacement(), "other"));
+            deleteButton = lensButton("lens.remove_placement", deleteConfirmation.armed() ? "Подтвердить удаление" : "Удалить",
+                WorkshopIcon.DELETE, part(r, 3, 4), selected && selectedPlacement().ownedByDevice(),
+                false, false, this::deleteSelectedPlacement);
+        }
+    }
+
+    private int sessionRowCapacity() { return WorkshopLensLayout.at(width, height).rows(); }
+    private String displayedVisibility() {
+        return placementsTab && selectedPlacement() != null ? selectedPlacement().visibility() : visibility;
+    }
+    private int placementRowCapacity() { return WorkshopLensLayout.at(width, height).rows(); }
+
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+        var s = WorkshopLensLayout.at(width, height);
+        WorkshopChrome.frame(context::fill, s.frame(), workshopTheme);
+        context.fill(s.status().x(), s.status().bottom() + 1, s.status().right(), s.status().bottom() + 2, workshopTheme.color("border-subtle"));
+        var session = previewSession();
+        String summary = session == null ? CompanionI18n.translate("Нет активных сессий")
+            : CompanionI18n.translate("active".equals(session.status()) ? "Сессия активна" : "Редактор не в сети")
+                + "  r" + session.revision() + "  " + session.viewerCount() + " " + CompanionI18n.translate("Участники");
+        WorkshopDraw.text(context, font, summary, s.status().x() + 4, s.status().y() + 5,
+            s.status().width() - 80, workshopTheme.color("text-primary"));
+        if (s.split() || showPreview) {
+            var p = s.preview();
+            context.fill(p.x(), p.y(), p.right(), p.bottom(), workshopTheme.color("field-bg"));
+            drawPreview(context, p, session);
+            String title = placementsTab && selectedPlacement() != null ? selectedPlacement().title() : session == null ? "" : session.title();
+            if (session != null) title = session.grid().wide() + "x" + session.grid().tall() + "  " + title;
+            WorkshopDraw.text(context, font, title, s.metadata().x() + 4, s.metadata().y() + 6,
+                s.metadata().width() - 8, workshopTheme.color("text-primary"));
+        }
+        if ((s.split() || !showPreview) && (placementsTab ? placements().isEmpty() : sessions().isEmpty()))
+            WorkshopDraw.text(context, font, CompanionI18n.translate(placementsTab ? "Размещений пока нет" : "Нет активных сессий"),
+                s.list().x() + 4, s.list().y() + 6, s.list().width() - 8, workshopTheme.color("text-secondary"));
+        String footer = status();
+        if (footer.isBlank() && session != null && session.sessionCode() != null && !session.sessionCode().isBlank())
+            footer = CompanionI18n.translate("Код Lens") + ": " + session.sessionCode();
+        WorkshopDraw.text(context, font, CompanionI18n.translate(footer), s.footer().x() + 4,
+            s.footer().y() + 6, s.footer().width() - 40, workshopTheme.color("text-secondary"));
+        super.extractRenderState(context, mouseX, mouseY, delta);
+    }
+
+    private LensDtos.Session previewSession() {
+        if (!placementsTab) return selectedSession();
+        var p = selectedPlacement();
+        return p == null ? null : sessions().stream().filter(s -> s.sessionId().equals(p.sessionId())).findFirst().orElse(null);
+    }
+
+    private void drawPreview(GuiGraphicsExtractor context, WorkshopLayout.Rect p, LensDtos.Session session) {
+        if (fixture && session != null) {
+            var texture = net.minecraft.resources.Identifier.fromNamespaceAndPath(MapKlussCompanionClient.MOD_ID, "textures/dev/library/great-wave.png");
+            WorkshopDraw.image(context, texture, p, 384, 256);
+        } else if (session != null && manager.previewAtlas(session.sessionId(), session.revision()) != null) {
+            WorkshopDraw.image(context, manager.previewAtlas(session.sessionId(), session.revision()), p,
+                session.previewWidth(), session.previewHeight());
+        } else {
+            WorkshopDraw.icon(context, WorkshopIcon.LENS, p.x() + Math.max(0, (p.width() - 16) / 2),
+                p.y() + Math.max(0, (p.height() - 16) / 2), workshopTheme.color("text-disabled"));
+        }
+    }
     private void deleteSelectedPlacement() {
         if (selectedPlacement() == null || !selectedPlacement().ownedByDevice()) return;
         if (!deleteConfirmation.confirmOrArm()) {
@@ -231,24 +294,12 @@ public final class LensScreen extends Screen {
         rememberCode();
         deleteConfirmation.reset();
         if (placementsTab == nextPlacementsTab) {
-            if (placementsTab) placementPage = advancePage(placementPage, manager.placements().size(), placementRowCapacity());
-            else sessionPage = advancePage(sessionPage, manager.sessions().size(), sessionRowCapacity());
+            if (placementsTab) placementPage = advancePage(placementPage, placements().size(), placementRowCapacity());
+            else sessionPage = advancePage(sessionPage, sessions().size(), sessionRowCapacity());
         } else {
             placementsTab = nextPlacementsTab;
         }
         rebuildControls();
-    }
-
-    private int sessionRowCapacity() {
-        CompanionUiLayout.Rect work = lensWork(lensShell());
-        int controlsY = work.bottom() - (work.height() < 210 ? 22 : 48);
-        return Math.max(0, Math.min(5, (controlsY - listY(work) - 6) / ROW_HEIGHT));
-    }
-
-    private int placementRowCapacity() {
-        CompanionUiLayout.Rect work = lensWork(lensShell());
-        int actionsY = work.bottom() - 22;
-        return Math.max(0, Math.min(6, (actionsY - listY(work) - 6) / ROW_HEIGHT));
     }
 
     private int advancePage(int current, int totalItems, int visibleRows) {
@@ -258,12 +309,12 @@ public final class LensScreen extends Screen {
 
     private String sessionTabLabel() {
         int rows = CompanionLayout.pageSize(sessionRowCapacity());
-        return CompanionI18n.translate("Сессии") + " · " + (sessionPage + 1) + "/" + totalPages(manager.sessions().size(), rows);
+        return CompanionI18n.translate("Сессии") + " · " + (sessionPage + 1) + "/" + totalPages(sessions().size(), rows);
     }
 
     private String placementTabLabel() {
         int rows = CompanionLayout.pageSize(placementRowCapacity());
-        return CompanionI18n.translate("Размещения рядом") + " · " + (placementPage + 1) + "/" + totalPages(manager.placements().size(), rows);
+        return CompanionI18n.translate("Размещения рядом") + " · " + (placementPage + 1) + "/" + totalPages(placements().size(), rows);
     }
 
     private static int totalPages(int totalItems, int pageSize) {
@@ -274,40 +325,31 @@ public final class LensScreen extends Screen {
         return Math.max(0, Math.min(current, totalPages(totalItems, pageSize) - 1));
     }
 
-    private void addVisibilityButton(int x, int y, int buttonWidth, String value, String label) {
-            addRenderableWidget(MapKlussButton.builder(CompanionI18n.text(label), button -> {
-                rememberCode();
-                visibility = value;
-                rebuildControls();
-            }).action("personal".equals(value) ? "lens.visibility_private" : "lens.visibility_group")
-                .selected(value.equals(visibility)).dimensions(x, y, buttonWidth, 20).build());
-    }
-
     private void reconcileSelection() {
-        List<LensDtos.Session> sessions = manager.sessions();
+        List<LensDtos.Session> sessions = sessions();
         if (selectedSessionId == null || sessions.stream().noneMatch(session -> session.sessionId().equals(selectedSessionId))) {
             selectedSessionId = sessions.isEmpty() ? null : sessions.get(0).sessionId();
         }
-        List<LensDtos.Placement> placements = manager.placements();
+        List<LensDtos.Placement> placements = placements();
         if (selectedPlacementId == null || placements.stream().noneMatch(placement -> placement.placementId().equals(selectedPlacementId))) {
             selectedPlacementId = placements.isEmpty() ? null : placements.get(0).placementId();
         }
     }
 
     private LensDtos.Placement selectedPlacement() {
-        return manager.placements().stream()
+        return placements().stream()
             .filter(placement -> placement.placementId().equals(selectedPlacementId))
             .findFirst().orElse(null);
     }
 
     private LensDtos.Session selectedSession() {
-        return manager.sessions().stream()
+        return sessions().stream()
             .filter(session -> session.sessionId().equals(selectedSessionId))
             .findFirst().orElse(null);
     }
 
     private boolean ownsSession(String sessionId) {
-        return manager.sessions().stream()
+        return sessions().stream()
             .anyMatch(session -> session.sessionId().equals(sessionId) && session.ownedByUser());
     }
 
@@ -325,107 +367,20 @@ public final class LensScreen extends Screen {
     }
 
     private String fingerprint() {
-        return manager.sessions().stream().map(session -> session.sessionId() + ":" + session.revision()).collect(Collectors.joining("|"))
-            + "/" + manager.placements().stream().map(placement -> placement.placementId() + ":" + placement.revision()).collect(Collectors.joining("|"));
+        return sessions().toString() + "/" + placements().toString();
     }
 
     private void rememberCode() {
         if (codeInput != null) code = codeInput.getValue();
     }
 
-    @Override
-    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
-        CompanionUiLayout.Shell shell = MapKlussUi.drawShell(
-            context, font, width, height,
-            ScreenViewModel.shell(CompanionUiLayout.Destination.LENS, "MapKluss Lens", manager.status()), false
-        );
-        CompanionUiLayout.Rect work = lensWork(shell);
-        drawLiveSummary(context, work);
-        int listTop = listY(work);
-
-        if (!placementsTab && manager.sessions().isEmpty()) {
-            drawLensEmptyState(context, work, listTop, "Нет активных сессий", "Запусти Lens в редакторе или войди по коду", work.height() < 210 ? 26 : 54);
-        }
-        if (placementsTab && manager.placements().isEmpty()) {
-            drawLensEmptyState(context, work, listTop, "Размещений пока нет", "Выбери сессию и закрепи её по угловой рамке", 32);
-        }
-        super.extractRenderState(context, mouseX, mouseY, delta);
-        MapKlussUi.drawNavigation(context, shell, CompanionUiLayout.Destination.LENS);
-    }
-
-    private void drawLensEmptyState(
-        GuiGraphicsExtractor context,
-        CompanionUiLayout.Rect work,
-        int listTop,
-        String title,
-        String detail,
-        int reservedBottom
-    ) {
-        int availableHeight = Math.max(0, work.bottom() - listTop - reservedBottom);
-        if (availableHeight >= 42) {
-            MapKlussUi.drawEmptyState(context, font, title, detail, work.x(), listTop, work.width(), availableHeight);
-        } else if (availableHeight >= font.lineHeight) {
-            MapKlussUi.drawCenteredIn(context, font, title, work.x() + work.width() / 2,
-                listTop + Math.max(0, (availableHeight - font.lineHeight) / 2), work.width() - 20, MapKlussUi.ACCENT);
-        }
-    }
-
-    private void drawLiveSummary(GuiGraphicsExtractor context, CompanionUiLayout.Rect work) {
-        if (work.height() < 170) return;
-        int top = work.y();
-        int height = Math.min(58, Math.max(38, joinY(work) - top - 8));
-        context.fill(work.x(), top, work.right(), top + height, UiTheme.SURFACE_RAISED);
-        LensDtos.Session selected = selectedSession();
-        int accent = selected == null ? UiTheme.AMBER : "active".equals(selected.status()) ? UiTheme.LIME : UiTheme.CYAN;
-        context.fill(work.x(), top, work.x() + 3, top + height, accent);
-        String title = selected == null ? "Lens не подключён" : selected.title();
-        String detail = selected == null
-            ? "Ожидаю live-сессию редактора"
-            : "revision " + selected.revision() + "  ·  " + selected.viewerCount() + " зр.  ·  "
-                + selected.grid().wide() + "×" + selected.grid().tall() + "  ·  " + selected.tileResolution() + "px/карта";
-        MapKlussUi.drawLeft(context, font, title, work.x() + 14, top + 11, work.width() - 28, MapKlussUi.WHITE);
-        MapKlussUi.drawLeft(context, font, detail, work.x() + 14, top + 29, work.width() - 28, MapKlussUi.MUTED);
-    }
-
-    private CompanionUiLayout.Shell lensShell() {
-        return CompanionUiLayout.shell(width, height, false);
-    }
-
-    private CompanionUiLayout.Rect lensWork(CompanionUiLayout.Shell shell) {
-        CompanionUiLayout.Rect content = shell.content();
-        return new CompanionUiLayout.Rect(content.x() + 14, content.y() + 12, Math.max(1, content.width() - 28), Math.max(1, content.height() - 24));
-    }
-
-    private int joinY(CompanionUiLayout.Rect work) {
-        return work.y() + (work.height() < 170 ? 0 : work.height() < 210 ? 46 : 70);
-    }
-
-    private int tabsY(CompanionUiLayout.Rect work) {
-        return joinY(work) + 30;
-    }
-
-    private int listY(CompanionUiLayout.Rect work) {
-        return tabsY(work) + 30;
-    }
-
-    private void addNavigationControls(CompanionUiLayout.Shell shell) {
-        for (int i = 0; i <= CompanionUiLayout.Destination.ACCOUNT.ordinal(); i++) {
-            CompanionUiLayout.Destination destination = CompanionUiLayout.Destination.values()[i];
-            CompanionUiLayout.Rect rect = CompanionUiLayout.navigationButton(shell, i);
-            addRenderableWidget(MapKlussButton.builder(Component.literal(""), button -> openDestination(destination))
-                .action(CompanionActionInventory.navigationAction(destination))
-                .tooltip(CompanionI18n.text(destinationLabel(destination)))
-                .dimensions(rect.x(), rect.y(), rect.width(), rect.height()).build());
-        }
-    }
-
     private void openDestination(CompanionUiLayout.Destination destination) {
         switch (destination) {
             case LIBRARY -> client().gui.setScreen(new CompanionLibraryScreen(this));
             case LENS -> { }
-            case SCAN -> client().gui.setScreen(new ScanScreen(this));
-            case TRACKER -> client().gui.setScreen(new TrackerOpenScreen(this));
-            case ACCOUNT -> client().gui.setScreen(new CompanionAccountScreen(this));
+            case SCAN -> client().gui.setScreen(new ScanScreen(this, fixture));
+            case TRACKER -> client().gui.setScreen(new TrackerOpenScreen(this, fixture));
+            case ACCOUNT -> client().gui.setScreen(new CompanionAccountScreen(this, fixture));
             default -> { }
         }
     }

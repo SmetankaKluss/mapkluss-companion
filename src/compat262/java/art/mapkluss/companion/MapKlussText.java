@@ -6,6 +6,12 @@ import net.minecraft.network.chat.Style;
 import net.minecraft.resources.Identifier;
 
 final class MapKlussText {
+    private static final FontDescription.Resource WORKSHOP_FONT = new FontDescription.Resource(Identifier.fromNamespaceAndPath(MapKlussCompanionClient.MOD_ID, "workshop"));
+
+    static Component workshop(String value) {
+        return Component.literal(value == null ? "" : value).setStyle(Style.EMPTY.withFont(WORKSHOP_FONT));
+    }
+
     private static final FontDescription.Resource FONT = new FontDescription.Resource(
         Identifier.fromNamespaceAndPath(MapKlussCompanionClient.MOD_ID, "inter")
     );

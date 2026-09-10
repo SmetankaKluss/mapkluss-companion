@@ -12,7 +12,19 @@ final class CompanionI18n {
     private static volatile String cachedLanguage;
 
     static {
+        put("Поиск и действия", "Search and actions");
+        put("Скрыть завершённые", "Hide completed");
         put("Готово", "Ready");
+        put("Превью", "Preview");
+        put("Название скана восстановлено.", "Scan title reset.");
+        put("Название скана обновлено: ", "Scan title updated: ");
+        put("Пропущено карт: ", "Missing maps: ");
+        put("Выбран скан из истории: ", "Selected scan: ");
+        put("Локально", "Local");
+        put("Активный", "Active");
+        put("Участники", "Viewers");
+        put("Сессия активна", "Session active");
+        put("Редактор не в сети", "Editor offline");
         put("Библиотека MapKluss", "MapKluss Library");
         put("Сохраненные арты, избранное и файлы схем", "Saved arts, favorites and schematic files");
         put("Мои арты", "My arts");
@@ -99,6 +111,8 @@ final class CompanionI18n {
         put("Текущий этап: ", "Current stage: ");
         put("Выбор части", "Select a part");
         put("Части арта", "Art parts");
+        put("Начать", "Start");
+        put("Текущий этап", "Current stage");
         put("частей", "parts");
         put("Инструменты", "Tools");
         put("Список", "List");
@@ -699,6 +713,10 @@ final class CompanionI18n {
     }
 
     private static String language(Minecraft client) {
+        if (Boolean.getBoolean("mapkluss.dev.libraryHarness.autoOpen")) {
+            String override = System.getProperty("mapkluss.dev.language", "");
+            if ("en".equals(override) || "ru".equals(override)) return override;
+        }
         String cached = cachedLanguage;
         if (cached != null) return cached;
         try {
@@ -715,10 +733,11 @@ final class CompanionI18n {
 
     static void toggle(Minecraft client) throws IOException {
         CompanionConfig config = CompanionConfig.load(client.gameDirectory.toPath());
-        String next = "en".equals(config.language()) ? "ru" : "en";
-        new CompanionConfig(config.supabaseUrl(), config.supabaseAnonKey(), config.siteUrl(), next, config.gatewayUrl())
+        String next = english(client) ? "ru" : "en";
+        config.withLanguage(next)
             .saveForRunDir(client.gameDirectory.toPath());
         cachedLanguage = next;
+        if (Boolean.getBoolean("mapkluss.dev.libraryHarness.autoOpen")) System.setProperty("mapkluss.dev.language", next);
     }
 
     static Component text(String value) {

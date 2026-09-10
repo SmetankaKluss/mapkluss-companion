@@ -13,6 +13,10 @@ import java.util.UUID;
 public final class OptionalLitematicaAdapter {
     private OptionalLitematicaAdapter() { }
 
+    public static Result createArtPlacement(Path schematicPath, BlockPos origin, String sha256) {
+        return createPlacement(schematicPath, origin, sha256, "art", PlacementKind.ART);
+    }
+
     public static Result createPlacement(Path schematicPath, BlockPos origin, String planSha256) {
         return createPlacement(schematicPath, origin, planSha256, "build", PlacementKind.BUILD);
     }
@@ -25,7 +29,7 @@ public final class OptionalLitematicaAdapter {
         if (!FabricLoader.getInstance().isModLoaded("litematica") || !FabricLoader.getInstance().isModLoaded("malilib")) {
             return new Result(false, "Litematica недоступна. Импортируйте схему вручную.");
         }
-        String placementName = "MapKluss Two-layer " + shortSha(planSha256) + " " + role + " @ "
+        String placementName = (kind == PlacementKind.ART ? "MapKluss Art " : "MapKluss Two-layer ") + shortSha(planSha256) + " " + role + " @ "
             + origin.getX() + "," + origin.getY() + "," + origin.getZ();
         UUID placementId = placementUuid(planSha256, role, origin);
         try {
@@ -162,7 +166,7 @@ public final class OptionalLitematicaAdapter {
 
     private static String selectedMessage(PlacementKind kind, boolean existing) {
         return switch (kind) {
-            case BUILD -> existing
+            case BUILD, ART -> existing
                 ? "Размещение Litematica выбрано."
                 : "Схема загружена в Litematica.";
             case REFERENCE -> existing
@@ -180,6 +184,7 @@ public final class OptionalLitematicaAdapter {
     static boolean ownsPlacementUuid(UUID id, String planSha256, BlockPos origin) {
         if (id == null || planSha256 == null || origin == null) return false;
         if (id.equals(placementUuid(planSha256, "build", origin))) return true;
+        if (id.equals(placementUuid(planSha256, "art", origin))) return true;
         for (int phase = 1; phase <= SuppressionPlanParser.PHASES; phase++) {
             if (id.equals(placementUuid(planSha256, String.format("remove-%02d", phase), origin))
                 || id.equals(placementUuid(planSha256, String.format("reference-%02d", phase), origin))) return true;
@@ -189,5 +194,5 @@ public final class OptionalLitematicaAdapter {
 
     public record Result(boolean placed, String message) { }
 
-    private enum PlacementKind { BUILD, REFERENCE }
+    private enum PlacementKind { BUILD, REFERENCE, ART }
 }

@@ -77,11 +77,13 @@ final class CompanionActionInventory {
             "library.my_arts", "library.favorites", "library.recent", "library.collections",
             "library.search", "library.search_clear", "library.refresh", "library.sync",
             "library.page_next",
-            "library.select_art", "library.toggle_favorite", "library.install", "library.open_tracker",
+            "library.search_toggle", "library.back_to_list", "library.highlight_art", "library.open_lens", "library.open_two_layer", "account.theme",
+            "library.select_art", "library.toggle_favorite", "library.install", "library.place", "library.part_previous", "library.part_next", "library.open_tracker",
             "library.open_site", "library.open_editor", "nav.library", "nav.lens", "nav.scan", "nav.tracker",
             "nav.account", "library.import_two_layer", "library.toggle_actions", "global.back", "global.language"
         ));
         result.put("art", ids(
+            "art.preview",
             "art.install", "art.install_tiles", "art.remove_install", "art.refresh",
             "art.privacy", "art.save", "art.delete", "art.favorite", "art.collections",
             "art.open_page", "art.open_editor", "art.track", "art.download_png",
@@ -91,11 +93,11 @@ final class CompanionActionInventory {
             , "art.prepare_autoframe", "art.tab_files", "art.tab_cloud", "art.tab_build", "art.tab_more"
         ));
         result.put("lens", ids(
-            "lens.join", "lens.leave", "lens.refresh", "lens.place",
+            "lens.join", "lens.leave", "lens.open_editor", "lens.refresh", "lens.place",
             "lens.remove_placement", "lens.visibility_private", "lens.visibility_group",
             "lens.hide_author", "lens.report", "global.back", "global.language"
             , "lens.select_session", "lens.select_placement", "lens.next_session_page",
-            "lens.next_placement_page", "lens.hide_placement"
+            "lens.next_placement_page", "lens.hide_placement", "lens.preview", "account.theme"
         ));
         result.put("scan", ids(
             "scan.hand", "scan.frame", "scan.wall", "scan.corners", "scan.save_png",
@@ -103,16 +105,26 @@ final class CompanionActionInventory {
             , "scan.title_apply", "scan.title_reset", "scan.corner_a", "scan.corner_b",
             "scan.import_refresh", "scan.history_previous", "scan.history_next", "scan.history_load",
             "scan.history_delete", "scan.open_folder", "scan.open_art", "scan.open_editor", "scan.open_cloud",
-            "scan.tab_result", "scan.tab_history", "scan.tab_open"
+            "scan.tab_result", "scan.tab_history", "scan.tab_open", "scan.details"
         ));
         result.put("tracker", ids(
             "tracker.open_session", "tracker.refresh", "tracker.set_count",
+            "tracker.build.open", "tracker.build.load", "tracker.build.anchor", "tracker.build.stop", "tracker.build.two_layer",
+            "tracker.build.view", "tracker.build.rotate_left", "tracker.build.rotate_right",
+            "tracker.build.previous", "tracker.build.next", "tracker.build.unanchor",
+            "tracker.build.rotate", "tracker.build.mirror", "tracker.build.here", "tracker.build.apply",
+            "tracker.build.group", "tracker.group.create", "tracker.group.join", "tracker.group.invite",
+            "tracker.group.copy", "tracker.group.refresh", "tracker.group.leave", "tracker.group.confirm", "tracker.group.cancel",
+            "tracker.group.place", "tracker.group.unplace",
+            "tracker.group.source_upload", "tracker.group.source_download",
+            "tracker.group.adopt",
             "tracker.add_one", "tracker.clear_count", "tracker.complete_all",
             "tracker.status_gathering", "tracker.status_building",
             "global.back", "global.language"
             , "tracker.history_page", "tracker.open_history_art", "tracker.retry",
             "tracker.change_session", "tracker.search", "tracker.search_clear", "tracker.hide_completed",
-            "tracker.open_site", "tracker.open_art", "tracker.step_cycle", "tracker.undo", "tracker.decrement"
+            "tracker.open_site", "tracker.open_art", "tracker.step_cycle", "tracker.undo", "tracker.decrement",
+            "tracker.tools", "tracker.preview", "tracker.table_previous", "tracker.table_next"
         ));
         result.put("account", ids(
             "account.login_start", "account.login_poll", "account.copy_code", "account.open_site",
@@ -131,7 +143,8 @@ final class CompanionActionInventory {
         result.put("two_layer", ids(
             "two_layer.select_part", "two_layer.resume", "global.back", "global.language"
             , "two_layer.start_cloud", "two_layer.import_zip", "two_layer.stop",
-            "two_layer.tile_previous_page", "two_layer.tile_next_page"
+            "two_layer.tile_previous_page", "two_layer.tile_next_page",
+            "two_layer.highlight_part", "two_layer.preview", "account.theme"
         ));
         result.put("update", ids("update.telegram", "update.download", "update.dismiss"));
         result.put("inventory", ids("inventory.recognize_maps"));

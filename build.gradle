@@ -54,6 +54,28 @@ def uiLabEnabled = providers.gradleProperty('mapkluss_ui_lab').orElse('false').g
 def uiLabJavaHome = providers.gradleProperty('mapkluss_ui_lab_java_home').orNull
 def uiLabJavaExecutable = providers.gradleProperty('mapkluss_ui_lab_java_executable').orNull
 def uiLabCaptureOnOpen = providers.gradleProperty('mapkluss_ui_lab_capture_on_open').orElse('false').get()
+def normalLibraryHarnessEnabled = providers.gradleProperty('mapkluss_normal_library_harness').orElse('false').get().toBoolean()
+def normalLibraryHarnessFixture = providers.gradleProperty('mapkluss_library_fixture').orElse('populated').get()
+def normalLibraryHarnessLanguage = providers.gradleProperty('mapkluss_library_language').orElse('ru').get()
+def normalLibraryHarnessJavaHome = providers.gradleProperty('mapkluss_library_harness_java_home').orNull
+def normalLibraryHarnessJavaExecutable = providers.gradleProperty('mapkluss_library_harness_java_executable').orNull
+def controlDeskEnabled = providers.gradleProperty('mapkluss_control_desk').orElse('false').get().toBoolean()
+def controlDeskJavaHome = providers.gradleProperty('mapkluss_control_desk_java_home').orNull
+def controlDeskJavaExecutable = providers.gradleProperty('mapkluss_control_desk_java_executable').orNull
+def controlDeskTestToken = providers.gradleProperty('mapkluss_control_desk_test_token').orNull
+def developmentLibraryFeatureEnabled = normalLibraryHarnessEnabled || controlDeskEnabled
+def developmentJetBrainsRuntimeRequired = providers.gradleProperty('mapkluss_dev_jbr').orElse('false').get().toBoolean()
+def macOs = System.getProperty('os.name', '').toLowerCase().contains('mac')
+
+if (normalLibraryHarnessEnabled) {
+    def fixtureNames = ['empty', 'loading', 'populated', 'error', 'long-name']
+    if (!fixtureNames.contains(normalLibraryHarnessFixture)) {
+        throw new GradleException("Unsupported MapKluss Library harness fixture '${normalLibraryHarnessFixture}'. Supported fixtures: ${fixtureNames.join(', ')}")
+    }
+    if (!['ru', 'en'].contains(normalLibraryHarnessLanguage)) {
+        throw new GradleException("Unsupported MapKluss Library harness language '${normalLibraryHarnessLanguage}'. Supported languages: ru, en")
+    }
+}
 
 apply plugin: target.unobfuscated ? 'net.fabricmc.fabric-loom' : 'net.fabricmc.fabric-loom-remap'
 
@@ -65,17 +87,51 @@ base {
 }
 
 loom {
+    if (providers.gradleProperty('mapkluss_tracker_qa').orElse('false').get().toBoolean()) {
+        runs {
+            client {
+                runDir "build/tracker-qa/run-${targetMinecraft}"
+            }
+        }
+    }
     providers.gradleProperty('minecraft_manifest_url').orNull?.with { manifestUrl ->
         customMinecraftManifest.set(manifestUrl)
     }
-    if (uiLabEnabled) {
+    if (uiLabEnabled || developmentLibraryFeatureEnabled) {
         runs {
             client {
                 vmArgs '-XX:+AllowEnhancedClassRedefinition'
-                vmArgs '-Xdock:name=MapKluss UI Lab'
-                vmArgs '-Dapple.awt.application.name=MapKluss UI Lab'
-                vmArgs '-Dmapkluss.uiLab.autoOpen=true'
-                vmArgs "-Dmapkluss.uiLab.captureOnOpen=${uiLabCaptureOnOpen}"
+                if (developmentLibraryFeatureEnabled) {
+                    runDir "build/library-harness/run-${targetMinecraft}"
+                }
+                if (controlDeskEnabled) {
+                    runDir "build/control-desk/run-${targetMinecraft}"
+                    vmArgs '--add-modules=jdk.httpserver'
+                }
+                if (uiLabEnabled) {
+                    if (macOs) {
+                        vmArgs '-Xdock:name=MapKluss UI Lab'
+                        vmArgs '-Dapple.awt.application.name=MapKluss UI Lab'
+                    }
+                    vmArgs '-Dmapkluss.uiLab.autoOpen=true'
+                    vmArgs "-Dmapkluss.uiLab.captureOnOpen=${uiLabCaptureOnOpen}"
+                }
+                if (developmentLibraryFeatureEnabled) {
+                    if (macOs) {
+                        vmArgs '-Xdock:name=MapKluss Library Harness'
+                        vmArgs '-Dapple.awt.application.name=MapKluss Library Harness'
+                    }
+                    vmArgs '-Dmapkluss.dev.libraryHarness.autoOpen=true'
+                    vmArgs "-Dmapkluss.dev.libraryFixture=${normalLibraryHarnessFixture}"
+                    vmArgs "-Dmapkluss.dev.language=${normalLibraryHarnessLanguage}"
+                }
+                if (controlDeskEnabled) {
+                    vmArgs '-Dmapkluss.dev.controlDesk.enabled=true'
+                    if (controlDeskTestToken != null) {
+                        vmArgs '-Dmapkluss.dev.controlDesk.testMode=true'
+                        vmArgs "-Dmapkluss.dev.controlDesk.testToken=${controlDeskTestToken}"
+                    }
+                }
             }
         }
     }
@@ -103,7 +159,7 @@ dependencies {
         modImplementation "net.fabricmc.fabric-api:fabric-key-binding-api-v1:1.1.7+4fc5413f3e"
         modImplementation "net.fabricmc.fabric-api:fabric-lifecycle-events-v1:2.6.15+4ebb5c083e"
         modImplementation "net.fabricmc.fabric-api:fabric-rendering-v1:16.2.6+1fb1cde93e"
-        if (uiLabEnabled) {
+        if (uiLabEnabled || developmentLibraryFeatureEnabled || providers.gradleProperty('mapkluss_tracker_qa').orElse('false').get().toBoolean()) {
             modRuntimeOnly "net.fabricmc.fabric-api:fabric-api:0.141.4+1.21.11"
         }
     } else {
@@ -120,7 +176,7 @@ dependencies {
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(target.java)
-        if (uiLabEnabled) {
+        if (uiLabEnabled || developmentLibraryFeatureEnabled || developmentJetBrainsRuntimeRequired) {
             vendor = JvmVendorSpec.JETBRAINS
         }
     }
@@ -136,8 +192,19 @@ sourceSets {
                 srcDir 'src/uiLabShared/java'
                 srcDir target.unobfuscated ? 'src/uiLab262/java' : 'src/uiLabLegacy/java'
             }
+            if (developmentLibraryFeatureEnabled) {
+                srcDir 'src/devLibraryHarnessShared/java'
+                srcDir target.unobfuscated ? 'src/devLibraryHarness262/java' : 'src/devLibraryHarnessLegacy/java'
+            }
+            if (controlDeskEnabled) {
+                srcDir 'src/devControlDeskShared/java'
+                srcDir target.unobfuscated ? 'src/devControlDesk262/java' : 'src/devControlDeskLegacy/java'
+            }
         }
         resources {
+            if (developmentLibraryFeatureEnabled) {
+                srcDir 'src/devLibraryHarness/resources'
+            }
             if (uiLabEnabled) {
                 srcDir 'src/uiLab/resources'
             }
@@ -153,12 +220,17 @@ sourceSets {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release = target.java
+    if (controlDeskEnabled) {
+        options.compilerArgs.addAll(['--add-modules', 'jdk.httpserver'])
+    }
 }
 
 tasks.withType(JavaExec).configureEach {
-    if (uiLabEnabled && uiLabJavaHome != null && name == 'runClient') {
+    def developmentJavaHome = uiLabEnabled ? uiLabJavaHome : (controlDeskEnabled ? controlDeskJavaHome : normalLibraryHarnessJavaHome)
+    def developmentJavaExecutable = uiLabEnabled ? uiLabJavaExecutable : (controlDeskEnabled ? controlDeskJavaExecutable : normalLibraryHarnessJavaExecutable)
+    if ((uiLabEnabled || developmentLibraryFeatureEnabled) && developmentJavaHome != null && name == 'runClient') {
         def uiLabExecutableFile = layout.file(providers.provider {
-            file(uiLabJavaExecutable ?: "${uiLabJavaHome}/bin/java")
+            file(developmentJavaExecutable ?: "${developmentJavaHome}/bin/java")
         })
         def uiLabBaseLauncher = javaToolchains.launcherFor {
             languageVersion = JavaLanguageVersion.of(target.java)
@@ -176,6 +248,8 @@ tasks.withType(JavaExec).configureEach {
 
 test {
     useJUnitPlatform()
+    // The dense 100-map residency regression retains over 512 MiB of verified observations and geometry.
+    maxHeapSize = '1g'
     systemProperty 'mapkluss.test.minecraftVersion', targetMinecraft
 }
 
@@ -192,13 +266,22 @@ processResources {
     }
 }
 
+tasks.named('jar') {
+    from('licenses') { into 'licenses' }
+    from('THIRD_PARTY_NOTICES.md')
+}
+
 tasks.register('verifyProductionJarExcludesUiLab') {
     dependsOn tasks.named('jar')
-    onlyIf { !uiLabEnabled }
+    onlyIf { !uiLabEnabled && !developmentLibraryFeatureEnabled && !controlDeskEnabled }
     doLast {
         def labEntries = zipTree(tasks.named('jar').get().archiveFile.get().asFile)
             .matching {
                 include 'art/mapkluss/companion/MapKlussUiLab*.class'
+                  include 'art/mapkluss/companion/CompanionLibraryDevFixture*.class'
+                  include 'assets/mapkluss-companion/textures/dev/**'
+                include 'art/mapkluss/companion/MapKlussLibraryHarness*.class'
+                include 'art/mapkluss/companion/MapKlussControlDesk*.class'
                 include 'assets/mapkluss-ui-lab/**'
             }
             .files

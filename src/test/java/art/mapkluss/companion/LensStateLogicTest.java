@@ -18,6 +18,14 @@ final class LensStateLogicTest {
     }
 
     @Test
+    void requestsThePreviewUntilTheCurrentRevisionIsActuallyReady() {
+        assertFalse(LensStateLogic.needsPreviewDownload(false, true, 7));
+        assertTrue(LensStateLogic.needsPreviewDownload(true, true, 7));
+        assertTrue(LensStateLogic.needsPreviewDownload(false, false, 7));
+        assertFalse(LensStateLogic.needsPreviewDownload(true, false, 0));
+    }
+
+    @Test
     void appliesHiddenAndOwnerFilters() {
         LensDtos.Grid grid = new LensDtos.Grid(1, 1);
         LensDtos.Anchor anchor = new LensDtos.Anchor(0, 64, 0);

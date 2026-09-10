@@ -16,6 +16,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class SuppressionBundleInstallerTest {
     @TempDir Path tempDir;
 
+    @Test void selectedTileKeepsTheFullRecoveryCatalog() throws Exception {
+        var catalog=SuppressionBundleReader.readCatalog(SuppressionTestFixtures.multiZipBytes(),"fixture");
+        var installed=SuppressionBundleInstaller.installCatalog(tempDir,catalog,1);
+        org.junit.jupiter.api.Assertions.assertEquals(1,installed.trackerSource().tile());
+        try(var loaded=LiveBuildSourceCache.forRunDir(tempDir).load(installed.trackerSource().reference())) {
+            org.junit.jupiter.api.Assertions.assertEquals(2,loaded.bundle().tileCount());
+            installed.trackerSource().validate(loaded,catalog.tiles().get(1).bundle());
+            assertThrows(IllegalArgumentException.class,()->new LiveBuildCatalogLink("e".repeat(64),1)
+                .validate(loaded,catalog.tiles().get(1).bundle()));
+        }
+        assertThrows(java.io.IOException.class,()->SuppressionBundleInstaller.installCatalog(tempDir,catalog,2));
+    }
+
     @Test
     void installsOnlyTheCurrentArtOnlyPlanContract() throws Exception {
         byte[] litematic = SuppressionTestFixtures.litematicV3Bytes();

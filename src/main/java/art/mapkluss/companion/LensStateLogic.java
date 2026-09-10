@@ -11,6 +11,10 @@ public final class LensStateLogic {
         return responseRevision > currentRevision;
     }
 
+    public static boolean needsPreviewDownload(boolean responseChanged, boolean atlasReady, long sessionRevision) {
+        return sessionRevision > 0 && (responseChanged || !atlasReady);
+    }
+
     public static double squaredDistanceToBounds(
         double x, double y, double z,
         double minX, double minY, double minZ,

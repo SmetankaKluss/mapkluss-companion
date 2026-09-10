@@ -69,6 +69,7 @@ public final class CompanionRuntime {
     }
 
     public void saveSession(String accessToken, String userId) throws IOException {
+        LiveBuildClient.instance().groups().clear();
         sessionStore.saveSession(accessToken, userId);
         config.setAccessToken(accessToken);
     }
@@ -93,6 +94,7 @@ public final class CompanionRuntime {
     }
 
     public void clearSession() throws IOException {
+        LiveBuildClient.instance().groups().clear();
         sessionStore.clear();
         config.setAccessToken(null);
     }

@@ -174,7 +174,7 @@ final class SuppressionReferenceLitematic {
         }
     }
 
-    private static int[] unpack(long[] packed, int volume, int bitsPerEntry, int paletteSize) throws IOException {
+    static int[] unpack(long[] packed, int volume, int bitsPerEntry, int paletteSize) throws IOException {
         long expectedLongs = ((long) volume * bitsPerEntry + 63) / 64;
         if (packed.length != expectedLongs) throw new IOException("Two-layer BlockStates length is invalid");
         long mask = (1L << bitsPerEntry) - 1L;
