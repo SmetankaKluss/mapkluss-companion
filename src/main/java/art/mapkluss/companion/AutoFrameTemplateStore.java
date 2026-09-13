@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 public final class AutoFrameTemplateStore {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -76,11 +77,18 @@ public final class AutoFrameTemplateStore {
     }
 
     public synchronized List<AutoFrameTemplate> templates() {
-        return List.copyOf(templates);
+        return templates.stream().filter(AutoFrameTemplateStore::usable).toList();
+    }
+
+    synchronized List<AutoFrameTemplate> templates(String connection) {
+        String namespace = AutoFrameInference.namespace(connection);
+        return templates().stream().filter(template -> !template.artId().startsWith("local-v2-")
+            || template.artId().startsWith(namespace)).toList();
     }
 
     public synchronized Optional<AutoFrameTemplate> find(String artId, String versionId) {
-        return templates.stream().filter(template -> sameKey(template, artId, versionId)).findFirst();
+        return templates.stream().filter(AutoFrameTemplateStore::usable)
+            .filter(template -> sameKey(template, artId, versionId)).findFirst();
     }
 
     public synchronized void upsert(AutoFrameTemplate template) {
@@ -88,6 +96,21 @@ public final class AutoFrameTemplateStore {
         templates.removeIf(existing -> existing.artId().equals(template.artId()));
         templates.add(template);
         while (templates.size() > MAX_TEMPLATES) templates.remove(0);
+        discardInvalidActive();
+    }
+
+    synchronized void replaceInferred(String connection, Set<Integer> observedIds, List<AutoFrameTemplate> replacements) {
+        String namespace = AutoFrameInference.namespace(connection);
+        // Reconsider visible inferred groups when more tiles arrive, without touching Cloud or other worlds.
+        List<AutoFrameTemplate> incomplete = templates.stream().filter(template -> template.artId().startsWith(namespace)
+            && !observedIds.containsAll(template.tileMapIds())).toList();
+        templates.removeIf(template -> template.artId().startsWith(namespace)
+            && observedIds.containsAll(template.tileMapIds()));
+        for (AutoFrameTemplate template : replacements) {
+            if (incomplete.stream().noneMatch(previous -> previous.tileMapIds().stream().anyMatch(template.tileMapIds()::contains))) {
+                upsert(template);
+            }
+        }
         discardInvalidActive();
     }
 
@@ -203,5 +226,10 @@ public final class AutoFrameTemplateStore {
 
     private static boolean sameKey(AutoFrameTemplate template, String artId, String versionId) {
         return template.artId().equals(artId) && template.versionId().equals(versionId);
+    }
+
+    private static boolean usable(AutoFrameTemplate template) {
+        // Keep old guesses in the file for rollback, but do not reuse the single-art chest inference.
+        return !template.artId().startsWith("local-") || template.artId().startsWith("local-v2-");
     }
 }

@@ -101,6 +101,44 @@ class LiveBuildBundleRuntimeTest {
             }
         }
     }
+    @Test void failedMovedSharedPlacementKeepsExistingAnchorAndObservations() throws Exception {
+        for(int failureMode=0;failureMode<4;failureMode++){
+            final int mode=failureMode;
+            try(var r=new LiveBuildBundleRuntime(LiveBuildBundleWorkspace.read(groupFixture),"a".repeat(64),"minecraft:overworld",i->0xff90c040)){
+                ready(r);r.anchor(new LiveBuildProgress.Position(0,64,0),LiveBuildTransform.NONE);ready(r);
+                for(int i=0;i<600;i++)r.scan(p->stone,32,0);
+                var identity=r.identity();var source=r.observationSource(0);var states=source.savedStates();
+                var valid=remoteMap(0,-1);var allowed=new java.util.concurrent.atomic.AtomicBoolean(true);
+                var next=new LiveBuildSharedPlacement(valid.tile(),valid.revision(),mode==0?"f".repeat(64):valid.targetSha256(),
+                    valid.phase(),valid.cellCount()+(mode==1?1:0),valid.worldBinding(),valid.dimension(),valid.origin(),valid.transform());
+                r.replaceGroupPlacement(next,allowed::get);
+                assertEquals(identity,r.identity());assertSame(source,r.observationSource(0));
+                int ticks=0;
+                while(r.preparing()){
+                    assertTrue(ticks++<10000);
+                    r.prepare(s->s,(s,t)->{
+                        if(mode==2)throw new IllegalArgumentException("Unresolvable replacement");
+                        if(mode==3)allowed.set(false);
+                        return s;
+                    });
+                    Thread.sleep(1);
+                }
+                assertTrue(r.failed());assertEquals(identity,r.identity());assertSame(source,r.observationSource(0));
+                assertArrayEquals(states,source.savedStates());
+                assertEquals(identity,r.snapshot(1).placements().getFirst().identity());
+            }
+        }
+    }
+    @Test void validMovedSharedPlacementCommitsOnlyAfterPreparationAndPreservesNeighbour() throws Exception {
+        try(var r=new LiveBuildBundleRuntime(LiveBuildBundleWorkspace.read(groupFixture),"a".repeat(64),"minecraft:overworld",i->0xff90c040)){
+            ready(r);r.anchor(new LiveBuildProgress.Position(0,64,0),LiveBuildTransform.NONE);ready(r);
+            var neighbour=r.identity();r.select(1);ready(r);
+            r.anchor(new LiveBuildProgress.Position(128,64,0),LiveBuildTransform.NONE);ready(r);var old=r.identity();
+            var next=remoteMap(1,-1);r.replaceGroupPlacement(next,()->true);assertEquals(old,r.identity());ready(r);
+            assertFalse(r.failed());assertTrue(r.matchesGroupPlacement(next));assertEquals(2,r.snapshot(1).placements().size());
+            r.select(0);ready(r);assertEquals(neighbour,r.identity());
+        }
+    }
     @Test void revocationAfterPhaseDecodeButBeforePlacementCommitStillCancels() {
         assertTimeoutPreemptively(Duration.ofSeconds(15),()->{
             var w=LiveBuildBundleWorkspace.read(groupFixture);

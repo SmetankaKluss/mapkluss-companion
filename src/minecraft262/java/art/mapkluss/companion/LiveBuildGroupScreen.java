@@ -25,7 +25,7 @@ public final class LiveBuildGroupScreen extends Screen {
     public LiveBuildGroupScreen(Screen parent) { super(Component.literal("MapKluss Group"));this.parent=parent; }
     private String tr(String ru,String en) { return CompanionI18n.english(Minecraft.getInstance())?en:ru; }
     private WorkshopLayout.Rect frame() {
-        int w=Math.min(420,Math.max(200,width-16)),h=Math.min(220,Math.max(180,height-16));
+        int w=Math.min(420,Math.max(200,width-16)),h=Math.min(244,Math.max(180,height-16));
         return new WorkshopLayout.Rect((width-w)/2,(height-h)/2,w,h);
     }
     private void button(String id,String label,WorkshopIcon icon,int x,int y,int w,java.util.function.BooleanSupplier enabled,Runnable action) {
@@ -41,7 +41,7 @@ public final class LiveBuildGroupScreen extends Screen {
         shownRole=role();
         var r=frame();int x=r.x()+12,w=r.width()-24,y=r.y()+50,half=(w-8)/2;
         if(confirmation!=null){
-            button("tracker.group.confirm",tr("Подтвердить","Confirm"),WorkshopIcon.CHECK,x,y+52,half,()->groups.available()&&!groups.busy(),()->{
+            button("tracker.group.confirm",tr("Подтвердить","Confirm"),WorkshopIcon.CHECK,x,y+52,half,()->groups.available()&&!groups.busy()&&!manager.sourceBusy()&&!manager.groupPlacementBusy(),()->{
                 Runnable action=confirmation;confirmation=null;action.run();redraw();
             });
             button("tracker.group.cancel",tr("Отмена","Cancel"),WorkshopIcon.BACK,x+half+8,y+52,half,()->true,()->{confirmation=null;redraw();});
@@ -72,21 +72,21 @@ public final class LiveBuildGroupScreen extends Screen {
             button("tracker.group.leave",tr("Выйти","Leave"),WorkshopIcon.CLOSE,x+half+8,y+72,half,()->!groups.busy()&&groups.group()!=null,
                 ()->{if(groups.group().role().equals("owner"))confirm(groups::leave,true);else groups.leave();});
             if(shownRole.equals("member")){
-                button("tracker.group.adopt",manager.selectedPlaced()?tr("Обновить этап","Update phase"):tr("Закрепить карту","Anchor map"),WorkshopIcon.TRACKER,x,y+96,half,
+                button("tracker.group.adopt",tr("Принять закреп","Accept placement"),WorkshopIcon.TRACKER,x,y+96,half,
                     manager::canAdoptGroupPlacement,()->{
-                        var remote=groups.placement(manager.selectedPart());var group=groups.group();
+                        var remote=manager.sharedPlacement();var group=groups.group();
                         if(remote==null)return;
-                        confirm(()->{if(java.util.Objects.equals(group,groups.group()))manager.adoptGroupPlacement(c,remote);},false);
-                        confirmationTitle=manager.selectedPlaced()?tr("Перейти на этап группы?","Use the group's phase?"):tr("Закрепить в этом мире?","Anchor in this world?");
+                        confirm(()->{if(java.util.Objects.equals(group,groups.group()))manager.acceptGroupPlacement(c,remote);},false);
+                        confirmationTitle=tr("Разместить схему по закрепу?","Place schematic at shared anchor?");
                         var p=remote.origin();
                         confirmationDetail=tr("Карта ","Map ")+(remote.tile()+1)+" : "+p.x()+" / "+p.y()+" / "+p.z();
                     });
-            }else button("tracker.group.place",tr("Передать карту","Share map"),WorkshopIcon.LINK,x,y+96,half,
-                ()->groups.canPublish()&&manager.groupPublication()!=null,()->{
+            }else button("tracker.group.place",tr("Поделиться закрепом","Share placement"),WorkshopIcon.LINK,x,y+96,half,
+                ()->groups.canPublish()&&manager.canTransferSource(true)&&manager.groupPublication()!=null,()->{
                     var placement=manager.groupPublication();var group=groups.group();
                     if(placement==null)return;
                     confirm(()->{if(java.util.Objects.equals(group,groups.group()))manager.publishGroupPlacement(placement);},false);
-                    confirmationTitle=tr("Передать координаты группе?","Share coordinates with group?");
+                    confirmationTitle=tr("Отправить схему и закреп группе?","Share schematic and placement?");
                     var p=placement.identity().origin();
                     confirmationDetail=tr("Карта ","Map ")+(placement.tile()+1)+" : "+p.x()+" / "+p.y()+" / "+p.z();
                 });
@@ -97,6 +97,12 @@ public final class LiveBuildGroupScreen extends Screen {
                     confirmationTitle=tr("Убрать карту из группы?","Unshare this map?");
                     confirmationDetail=tr("Карта ","Map ")+(tile+1);
                 });
+            if(shownRole.equals("member")){
+                button("tracker.group.previous",tr("Пред.","Prev."),WorkshopIcon.BACK,x,y+120,64,
+                    ()->groups.placements().size()>1&&!manager.groupPlacementBusy(),()->manager.cycleSharedPlacement(-1));
+                button("tracker.group.next",tr("След.","Next"),WorkshopIcon.MORE,x+w-64,y+120,64,
+                    ()->groups.placements().size()>1&&!manager.groupPlacementBusy(),()->manager.cycleSharedPlacement(1));
+            }
         }
         button("global.back",tr("Назад","Back"),WorkshopIcon.BACK,x,r.bottom()-28,w,()->true,this::onClose);
     }
@@ -111,6 +117,19 @@ public final class LiveBuildGroupScreen extends Screen {
         }
     }
     private String status() {
+        var placement=manager.groupPlacementStatus();
+        if(placement!=LiveBuildClient.GroupPlacementStatus.NONE)return switch(placement){
+            case SHARING->tr("Отправка схемы и закрепа…","Sharing schematic and placement…");
+            case SHARED->tr("Схема и закреп доступны группе","Schematic and placement shared");
+            case ACCEPTING->tr("Размещение схемы…","Placing schematic…");
+            case PLACED->tr("Схема размещена, трекер включён","Schematic placed, tracker active");
+            case FAILED->tr("Не удалось применить закреп. Повторите.","Could not apply placement. Retry.");
+            case STALE->tr("Закреп изменился. Примите его заново.","Placement changed. Accept it again.");
+            case LITEMATICA->tr("Не удалось разместить. Проверьте Litematica.","Could not place. Check Litematica.");
+            case ANCHOR_ONLY->tr("Закреп принят, схема не размещена. Повторите.","Anchor accepted, schematic not placed. Retry.");
+            case DIMENSION->tr("Перейдите в нужное измерение","Enter the matching dimension");
+            default->"";
+        };
         if(manager.sourceBusy())return tr("Передача схемы ","Transferring source ")+manager.sourcePercent()+"%";
         if(manager.sourceFailed())return tr("Не удалось передать схему","Source transfer failed");
         if(manager.sourceComplete())return tr("Схема готова","Source ready");
@@ -140,6 +159,10 @@ public final class LiveBuildGroupScreen extends Screen {
                 r.x()+12,r.y()+64,r.width()-24,theme.color("text-primary"));
             if(!closingGroup)WorkshopDraw.text(g,font,confirmationDetail!=null?confirmationDetail:tr("Только с участниками по приглашению.","Only with invited members."),
                 r.x()+12,r.y()+82,r.width()-24,theme.color("text-secondary"));
+        }else if(shownRole.equals("member")){
+            var remote=manager.sharedPlacement();
+            String label=remote==null?tr("Нет закрепов","No placements"):tr("Карта ","Map ")+(remote.tile()+1)+" / "+(groups.group().source().wide()*groups.group().source().tall());
+            WorkshopDraw.text(g,font,label,r.x()+84,r.y()+176,r.width()-168,theme.color("text-primary"));
         }
         super.extractRenderState(g,mouseX,mouseY,delta);
     }

@@ -13,6 +13,72 @@ import java.util.UUID;
 public final class OptionalLitematicaAdapter {
     private OptionalLitematicaAdapter() { }
 
+    public static boolean available() {
+        return FabricLoader.getInstance().isModLoaded("litematica") && FabricLoader.getInstance().isModLoaded("malilib");
+    }
+
+    /** Explicit acceptance may replace only this group's tile, including a manually moved old ghost. */
+    public static Result createGroupPlacement(Path path, BlockPos origin, UUID id, int tile) {
+        if (!available()) return new Result(false, "Нужны Litematica и MaLiLib.");
+        try {
+            var holderClass = Class.forName("fi.dy.masa.litematica.data.SchematicHolder");
+            var holder = holderClass.getMethod("getInstance").invoke(null);
+            var schematic = holderClass.getMethod("getOrLoad", Path.class).invoke(holder, path);
+            if (schematic == null) return new Result(false, "Не удалось открыть общую схему.");
+            var manager = Class.forName("fi.dy.masa.litematica.data.DataManager").getMethod("getSchematicPlacementManager").invoke(null);
+            var placementClass = Class.forName("fi.dy.masa.litematica.schematic.placement.SchematicPlacement");
+            return replaceGroupPlacement(manager, schematic, placementClass, origin, id, tile);
+        } catch (Throwable error) {
+            MapKlussCompanionClient.LOGGER.warn("Could not open group Litematica schematic.", error);
+            return new Result(false, "Не удалось открыть общую схему.");
+        }
+    }
+
+    static Result replaceGroupPlacement(Object manager, Object schematic, Class<?> placementClass, BlockPos origin, UUID id, int tile) {
+        List<Object> previous = List.of();
+        Object replacement = null;
+        try {
+            var create = java.util.Arrays.stream(placementClass.getMethods())
+                .filter(m -> m.getName().equals("createFor") && m.getParameterCount() == 6 && m.getParameterTypes()[5] == UUID.class)
+                .findFirst().orElseThrow();
+            replacement = create.invoke(null, schematic, origin, "MapKluss Group / " + (tile+1), true, true, id);
+            previous = groupPlacements(manager, id);
+            if (!removePlacements(manager, previous) || !groupPlacements(manager, id).isEmpty()) throw new IllegalStateException("Group ghost removal failed");
+            addGroupPlacement(manager, replacement);
+            var placed = groupPlacements(manager, id);
+            if (placed.size() != 1 || !origin.equals(placed.getFirst().getClass().getMethod("getOrigin").invoke(placed.getFirst())))
+                throw new IllegalStateException("Group ghost not installed");
+            manager.getClass().getMethod("setSelectedSchematicPlacement", placementClass).invoke(manager, placed.getFirst());
+            return new Result(true, "Схема размещена по общему закрепу.");
+        } catch (Throwable error) {
+            MapKlussCompanionClient.LOGGER.warn("Could not apply group Litematica placement.", error);
+            if (manager != null) {
+                try {
+                    if (replacement != null) removePlacements(manager, groupPlacements(manager, id));
+                    var remaining = groupPlacements(manager, id);
+                    for (var old : previous) if (!remaining.contains(old)) addGroupPlacement(manager, old);
+                } catch (ReflectiveOperationException restoreError) {
+                    MapKlussCompanionClient.LOGGER.warn("Could not restore previous group ghost.", restoreError);
+                }
+            }
+            return new Result(false, "Не удалось разместить общую схему. Проверьте Litematica.");
+        }
+    }
+
+    private static void addGroupPlacement(Object manager, Object placement) throws ReflectiveOperationException {
+        var add = java.util.Arrays.stream(manager.getClass().getMethods())
+            .filter(m -> m.getName().equals("addSchematicPlacement") && m.getParameterCount() == 2).findFirst().orElseThrow();
+        add.invoke(manager, placement, true);
+    }
+
+    private static List<Object> groupPlacements(Object manager, UUID id) throws ReflectiveOperationException {
+        List<Object> result = new ArrayList<>();
+        var entries = (List<?>)manager.getClass().getMethod("getAllSchematicsPlacements").invoke(manager);
+        for (Object placement : entries)
+            if (id.equals(placement.getClass().getMethod("getHashId").invoke(placement))) result.add(placement);
+        return result;
+    }
+
     public static Result createArtPlacement(Path schematicPath, BlockPos origin, String sha256) {
         return createPlacement(schematicPath, origin, sha256, "art", PlacementKind.ART);
     }

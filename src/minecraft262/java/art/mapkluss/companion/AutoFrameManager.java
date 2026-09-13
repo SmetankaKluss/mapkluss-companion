@@ -1,18 +1,13 @@
 package art.mapkluss.companion;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
@@ -173,13 +168,13 @@ public final class AutoFrameManager {
         if (known.ambiguous()) return;
         Optional<AutoFrameTemplate> selected = known.template();
         if (selected.isEmpty()) {
-            if (!dimensions.found()) {
-                setStatus(dimensions.status() == FrameGridResolver.Status.AMBIGUOUS
-                    ? "Размер сетки неоднозначен. Наведитесь на её ближнюю левую рамку"
-                    : "Не найдена полная сетка из " + tileCount + " рамок впереди и справа от курсора");
+            if (!inferAndRememberVisibleMaps(client, inventoryTiles)) return;
+            selected = knownTemplateForHeldMap(client, inventoryTiles, handTile.get(),
+                dimensions.found() ? dimensions.dimensions() : null).template();
+            if (selected.isEmpty()) {
+                setStatus("Не удалось надёжно восстановить сетку. Оставьте вместе только карты одного арта");
                 return;
             }
-            selected = inferLocalTemplate(client, inventoryTiles, null, dimensions.dimensions());
         }
         if (selected.isEmpty()) return;
 
@@ -450,7 +445,7 @@ public final class AutoFrameManager {
                 )
             ).toList();
             Map<Integer, MapStackRecognition.Match> matches = MapStackRecognition.resolve(
-                observations, templates.templates(), known
+                observations, templates.templates(connection), known
             );
             boolean changed = false;
             for (MapStackRecognition.Observation observation : observations) {
@@ -496,71 +491,29 @@ public final class AutoFrameManager {
     ) {
         try {
             AutoFrameTemplateStore templates = store(client);
-            List<AutoFrameTemplate> candidates = templates.templates().stream()
-                .filter(template -> template.tileHashes().contains(held.hash()))
-                .filter(template -> dimensions == null
-                    || template.tileHashes().size() != dimensions.cellCount()
-                    || (template.wide() == dimensions.wide() && template.tall() == dimensions.tall()))
-                .sorted(Comparator.comparingInt((AutoFrameTemplate template) -> template.tileHashes().size()).reversed())
-                .toList();
-            if (candidates.isEmpty()) return new KnownSelection(Optional.empty(), false);
-
-            Optional<AutoFrameMapRegistry.Binding> binding = registry(client)
-                .find(connectionKey(client), held.mapId());
-            if (binding.isPresent()) {
-                Optional<AutoFrameTemplate> mapped = candidates.stream().filter(template ->
-                    template.artId().equals(binding.get().artId())
-                        && template.versionId().equals(binding.get().versionId())
-                ).findFirst();
-                if (mapped.isPresent()) return selectKnown(templates, mapped.get(), client, held);
+            MapIdentity identity = identifyMaps(client,
+                List.of(new MapStackRecognition.Observation(held.mapId(), held.hash()))).get(held.mapId());
+            Optional<AutoFrameTemplate> selected = templates.templates(connectionKey(client)).stream()
+                .filter(template -> identity != null
+                    && identity.groupKey().equals(template.artId() + "|" + template.versionId()))
+                .findFirst();
+            if (selected.isPresent()) {
+                AutoFrameTemplate template = selected.get();
+                if (dimensions != null && (template.wide() != dimensions.wide() || template.tall() != dimensions.tall())) {
+                    setStatus("Размер рамок не совпадает с распознанным артом");
+                    return new KnownSelection(Optional.empty(), true);
+                }
+                templates.setActive(template);
+                templates.save();
+                return new KnownSelection(selected, false);
             }
-
-            if (candidates.size() == 1) return selectKnown(templates, candidates.getFirst(), client, held);
-
-            Map<String, Integer> counts = tileCounts(available);
-            List<AutoFrameTemplate> complete = candidates.stream()
-                .filter(template -> containsTemplate(counts, template))
-                .toList();
-            if (complete.size() == 1) return selectKnown(templates, complete.getFirst(), client, held);
-
-            Optional<AutoFrameTemplate> active = templates.activeTemplate().filter(candidates::contains);
-            if (active.isPresent() && allAvailableTilesBelongTo(active.get(), available)) {
-                return selectKnown(templates, active.get(), client, held);
-            }
-            setStatus("Эта карта подходит к нескольким артам. Оставьте в инвентаре карты только одного арта");
-            return new KnownSelection(Optional.empty(), true);
+            boolean ambiguous = templates.templates(connectionKey(client)).stream().anyMatch(template -> template.tileHashes().contains(held.hash()));
+            if (ambiguous) setStatus("Не удалось определить номер этой карты. Выберите арт в библиотеке");
+            return new KnownSelection(Optional.empty(), ambiguous);
         } catch (IOException error) {
             setStatus("Не удалось прочитать шаблоны AutoFrame");
             return new KnownSelection(Optional.empty(), true);
         }
-    }
-
-    private KnownSelection selectKnown(
-        AutoFrameTemplateStore templates,
-        AutoFrameTemplate template,
-        Minecraft client,
-        MapArtLayoutSolver.Tile held
-    ) throws IOException {
-        templates.setActive(template);
-        templates.save();
-        AutoFrameMapRegistry registry = registry(client);
-        String connection = connectionKey(client);
-        int tileIndex = exactTileIndex(template, held);
-        if (tileIndex < 0) {
-            tileIndex = registry.find(connection, held.mapId())
-                .filter(binding -> binding.artId().equals(template.artId())
-                    && binding.versionId().equals(template.versionId())
-                    && binding.tileIndex() < template.tileHashes().size()
-                    && template.tileHashes().get(binding.tileIndex()).equals(held.hash()))
-                .map(AutoFrameMapRegistry.Binding::tileIndex)
-                .orElse(-1);
-        }
-        if (tileIndex >= 0) {
-            registry.remember(connection, held.mapId(), template, tileIndex, held.hash());
-            registry.save();
-            mapMappingRevision++;
-        }
-        return new KnownSelection(Optional.of(template), false);
     }
 
     synchronized void rememberMapMappings(
@@ -568,143 +521,43 @@ public final class AutoFrameManager {
         AutoFrameTemplate template,
         List<MapArtLayoutSolver.Tile> tiles
     ) {
-        try {
-            AutoFrameMapRegistry registry = registry(client);
-            String connection = connectionKey(client);
-            Map<Integer, Integer> solvedIndices = solvedTileIndices(template, tiles);
-            for (MapArtLayoutSolver.Tile tile : tiles) {
-                int index = solvedIndices.getOrDefault(tile.mapId(), exactTileIndex(template, tile));
-                if (index >= 0) registry.remember(connection, tile.mapId(), template, index, tile.hash());
-            }
-            registry.save();
-            mapMappingRevision++;
-        } catch (IOException error) {
-            MapKlussCompanionClient.LOGGER.debug("Could not save AutoFrame map bindings.", error);
-        }
+        identifyMaps(client, tiles.stream()
+            .map(tile -> new MapStackRecognition.Observation(tile.mapId(), tile.hash())).toList());
+        mapMappingRevision++;
     }
 
-    private Map<Integer, Integer> solvedTileIndices(
-        AutoFrameTemplate template,
-        List<MapArtLayoutSolver.Tile> tiles
-    ) {
-        if (tiles.size() != template.tileHashes().size() || tiles.size() > 54) return Map.of();
-        try {
-            MapArtLayoutSolver.Layout layout = MapArtLayoutSolver.solveWithDimensions(
-                MapArtTiles.uniqueByMapId(tiles),
-                template.wide(),
-                template.tall()
-            );
-            if (!layout.reliable() || !layout.tileHashes().equals(template.tileHashes())) return Map.of();
-            Map<Integer, Integer> values = new HashMap<>();
-            for (int index = 0; index < layout.tileMapIds().size(); index++) values.put(layout.tileMapIds().get(index), index);
-            return Map.copyOf(values);
-        } catch (IllegalArgumentException unresolved) {
-            return Map.of();
-        }
-    }
-
-    private int exactTileIndex(AutoFrameTemplate template, MapArtLayoutSolver.Tile tile) {
-        int byId = template.tileIndexForMapId(tile.mapId());
-        if (byId >= 0 && template.tileHashes().get(byId).equals(tile.hash())) return byId;
-        int found = -1;
-        for (int index = 0; index < template.tileHashes().size(); index++) {
-            if (!template.tileHashes().get(index).equals(tile.hash())) continue;
-            if (found >= 0) return -1;
-            found = index;
-        }
-        return found;
-    }
-
-    private boolean allAvailableTilesBelongTo(AutoFrameTemplate template, List<MapArtLayoutSolver.Tile> available) {
-        if (available.isEmpty()) return true;
-        Set<String> expected = new HashSet<>(template.tileHashes());
-        return available.stream().allMatch(tile -> expected.contains(tile.hash()));
-    }
-
-    private Map<String, Integer> tileCounts(List<MapArtLayoutSolver.Tile> tiles) {
-        Map<String, Integer> counts = new HashMap<>();
-        for (MapArtLayoutSolver.Tile tile : tiles) counts.merge(tile.hash(), 1, Integer::sum);
-        return counts;
-    }
-
-    private boolean containsTemplate(Map<String, Integer> available, AutoFrameTemplate template) {
-        Map<String, Integer> needed = new HashMap<>();
-        for (String hash : template.tileHashes()) needed.merge(hash, 1, Integer::sum);
-        return needed.entrySet().stream().allMatch(entry -> available.getOrDefault(entry.getKey(), 0) >= entry.getValue());
-    }
-
-    private Optional<AutoFrameTemplate> inferLocalTemplate(
+    synchronized boolean inferAndRememberVisibleMaps(
         Minecraft client,
-        List<MapArtLayoutSolver.Tile> input,
-        Integer bottomLeftMapId
-    ) {
-        return inferLocalTemplate(client, input, bottomLeftMapId, null);
-    }
-
-    private Optional<AutoFrameTemplate> inferLocalTemplate(
-        Minecraft client,
-        List<MapArtLayoutSolver.Tile> input,
-        Integer bottomLeftMapId,
-        FrameGridResolver.Dimensions dimensions
+        List<MapArtLayoutSolver.Tile> input
     ) {
         List<MapArtLayoutSolver.Tile> tiles = MapArtTiles.uniqueByMapId(input);
-        if (tiles.isEmpty()) {
-            setStatus("В инвентаре или сундуке нет загруженных карт");
-            return Optional.empty();
-        }
-
-        final MapArtLayoutSolver.Layout layout;
-        try {
-            layout = dimensions == null
-                ? MapArtLayoutSolver.solveByMapId(tiles, bottomLeftMapId)
-                : MapArtLayoutSolver.solveByMapIdWithDimensions(
-                    tiles,
-                    bottomLeftMapId,
-                    dimensions.wide(),
-                    dimensions.tall()
-                );
-        } catch (IllegalArgumentException error) {
-            MapKlussCompanionClient.LOGGER.debug("Could not infer a local map-art layout.", error);
-            setStatus("Не удалось восстановить сетку карт");
-            return Optional.empty();
-        }
-        if (!layout.reliable()) {
-            setStatus("Не удалось надёжно восстановить сетку. Оставьте вместе только карты одного арта");
-            return Optional.empty();
-        }
-
-        String signature = layout.wide() + "x" + layout.tall() + ":" + String.join(",", layout.tileHashes());
-        String localId = "local-" + UUID.nameUUIDFromBytes(signature.getBytes(StandardCharsets.UTF_8));
-        AutoFrameTemplate template = new AutoFrameTemplate(
-            localId,
-            localId,
-            "Локальный арт " + layout.wide() + "x" + layout.tall(),
-            layout.wide(),
-            layout.tall(),
-            layout.tileHashes(),
-            layout.tileMapIds(),
-            Instant.now().toString()
-        );
+        Map<Integer, MapIdentity> known = identifyMaps(client, tiles.stream()
+            .map(tile -> new MapStackRecognition.Observation(tile.mapId(), tile.hash())).toList());
+        List<MapArtLayoutSolver.Tile> unknown = tiles.stream()
+            .filter(tile -> !known.containsKey(tile.mapId()) || known.get(tile.mapId()).groupKey().startsWith("local-v2-"))
+            .toList();
+        if (unknown.isEmpty()) return true;
+        String connection = connectionKey(client);
+        List<AutoFrameTemplate> inferred = MapArtGroupSolver.solve(unknown).stream()
+            .map(layout -> AutoFrameInference.template(layout, connection)).toList();
         try {
             AutoFrameTemplateStore templates = store(client);
-            templates.upsert(template);
-            templates.setActive(template);
+            templates.replaceInferred(connection, new HashSet<>(unknown.stream().map(MapArtLayoutSolver.Tile::mapId).toList()), inferred);
             templates.save();
-            setStatus("Сетка распознана: " + layout.wide() + "x" + layout.tall());
-            return Optional.of(template);
+            if (placement != null && templates.find(placement.template().artId(), placement.template().versionId()).isEmpty()) {
+                if (action != null) restoreInventory(client, action);
+                placement = null;
+                action = null;
+            }
+            identifyMaps(client, tiles.stream()
+                .map(tile -> new MapStackRecognition.Observation(tile.mapId(), tile.hash())).toList());
+            mapMappingRevision++;
+            return true;
         } catch (IOException error) {
+            MapKlussCompanionClient.LOGGER.debug("Could not save inferred map groups.", error);
             setStatus("Не удалось сохранить локальный шаблон карт");
-            return Optional.empty();
+            return false;
         }
-    }
-
-    synchronized Optional<AutoFrameTemplate> inferAndRememberVisibleMaps(
-        Minecraft client,
-        List<MapArtLayoutSolver.Tile> tiles
-    ) {
-        Optional<AutoFrameTemplate> inferred = inferLocalTemplate(client, tiles, null);
-        inferred.ifPresent(template -> rememberMapMappings(client, template, tiles));
-        return inferred;
     }
 
     private List<MapArtLayoutSolver.Tile> inventoryTiles(Minecraft client) {
@@ -727,28 +580,8 @@ public final class AutoFrameManager {
         AutoFrameTemplate template,
         AutoFramePlacement.Cell cell
     ) {
-        String connection = connectionKey(client);
-        try {
-            AutoFrameMapRegistry registry = registry(client);
-            for (int index = 0; index < 36; index++) {
-                ItemStack stack = client.player.getInventory().getItem(index);
-                Integer mapId = MapArtTiles.mapId(stack);
-                if (mapId == null) continue;
-                Optional<AutoFrameMapRegistry.Binding> binding = registry.find(connection, mapId);
-                if (binding.isPresent()
-                    && binding.get().artId().equals(template.artId())
-                    && binding.get().versionId().equals(template.versionId())
-                    && binding.get().tileIndex() == cell.tileIndex()
-                    && (binding.get().tileHash() == null || binding.get().tileHash().equals(cell.expectedHash()))) {
-                    String liveHash = mapHash(stack, client);
-                    if (cell.expectedHash().equals(liveHash)) return index;
-                }
-            }
-        } catch (IOException error) {
-            MapKlussCompanionClient.LOGGER.debug("Could not read exact AutoFrame map bindings.", error);
-        }
         for (int index = 0; index < 36; index++) {
-            if (cell.expectedHash().equals(mapHash(client.player.getInventory().getItem(index), client))) return index;
+            if (matchesCell(client, client.player.getInventory().getItem(index), template, cell)) return index;
         }
         return -1;
     }
@@ -759,9 +592,18 @@ public final class AutoFrameManager {
         AutoFrameTemplate template,
         AutoFramePlacement.Cell cell
     ) {
+        Integer mapId = MapArtTiles.mapId(stack);
         String liveHash = mapHash(stack, client);
-        if (liveHash != null) return cell.expectedHash().equals(liveHash);
-        return false;
+        if (mapId == null || liveHash == null || !cell.expectedHash().equals(liveHash)) return false;
+        try {
+            List<MapStackRecognition.Known> known = registry(client).find(connectionKey(client), mapId).stream()
+                .map(binding -> new MapStackRecognition.Known(binding.mapId(), binding.groupKey(),
+                    binding.tileIndex(), binding.tileHash())).toList();
+            return MapStackRecognition.matchesCell(new MapStackRecognition.Observation(mapId, liveHash),
+                template, cell.tileIndex(), store(client).templates(connectionKey(client)), known);
+        } catch (IOException error) {
+            return false;
+        }
     }
 
     private int matchingInventoryCount(Minecraft client, AutoFrameTemplate template) {

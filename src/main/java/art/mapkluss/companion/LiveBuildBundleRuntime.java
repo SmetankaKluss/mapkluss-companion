@@ -82,6 +82,14 @@ public final class LiveBuildBundleRuntime implements AutoCloseable {
     }
     public void changeGroupPhase(LiveBuildSharedPlacement remote,java.util.function.BooleanSupplier valid){
         if(!canChangeGroupPhase(remote)||!valid.getAsBoolean())throw new IllegalStateException("Phase changed");
+        replaceGroupPlacement(remote,valid);
+    }
+    /** Keep the previous anchor and observations until the complete replacement is validated. */
+    public void replaceGroupPlacement(LiveBuildSharedPlacement remote,java.util.function.BooleanSupplier valid){
+        cancelBackgroundPreparation();
+        if(remote==null||remote.tile()!=selected||preparing()||identity()==null||selectedBound()
+            ||!dimension.equals(remote.dimension())||!workspace.supportsPhase(remote)||!valid.getAsBoolean())
+            throw new IllegalStateException("Map cannot be replaced");
         var request=workspace.stage(selected,remote.phase());
         preparingTile=selected;groupPlacement=remote;groupValidity=valid;failed=false;replacingGroupPhase=true;
         future=CompletableFuture.supplyAsync(()->{
@@ -342,11 +350,13 @@ public final class LiveBuildBundleRuntime implements AutoCloseable {
             if(future!=null){
                 if(!future.isDone())return;
                 prepared=future.join();future=null;
+                if(groupPlacement!=null&&!groupValidity.getAsBoolean()){cancelGroupPreparation();return;}
                 var source=prepared.target();
                 preparation=new LiveBuildPreparation(source,new LiveBuildProgress.Identity(source.sha256(),world,dimension,new LiveBuildProgress.Position(0,0,0),0));
             }
             if(preparation!=null){
                 var a=preparation.advance(resolver,1);if(a==null)return;
+                if(groupPlacement!=null&&!groupValidity.getAsBoolean()){a.close();cancelGroupPreparation();return;}
                 if(replacingGroupPhase){
                     stagedGroupAssembly=a;
                     var part=a.parts().part(0);
@@ -385,6 +395,7 @@ public final class LiveBuildBundleRuntime implements AutoCloseable {
             }
             if(placement!=null){
                 var p=placement.advance(transformer,1);if(p==null)return;
+                if(groupPlacement!=null&&!groupValidity.getAsBoolean()){p.close();cancelGroupPreparation();return;}
                 if(replacingGroupPhase){
                     if(!groupValidity.getAsBoolean()){p.close();cancelGroupPreparation();return;}
                     var old=workspace.assembly(preparingTile);

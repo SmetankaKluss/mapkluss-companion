@@ -192,7 +192,7 @@ final class SuppressionReferenceLitematic {
         return states;
     }
 
-    private static long[] pack(int[] states, int bitsPerEntry) {
+    static long[] pack(int[] states, int bitsPerEntry) {
         long[] packed = new long[(int) (((long) states.length * bitsPerEntry + 63) / 64)];
         long mask = (1L << bitsPerEntry) - 1L;
         for (int index = 0; index < states.length; index++) {

@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -89,5 +90,39 @@ final class AutoFrameTemplateStoreTest {
         return new AutoFrameTemplate(
             artId, versionId, "Title", 1, 1, List.of(hash), "2026-07-10T12:00:00Z"
         );
+    }
+
+    @Test
+    void legacyGuessesAreIgnoredButRetainedOnDisk() throws Exception {
+        Path path = tempDirectory.resolve("legacy.json");
+        var store = AutoFrameTemplateStore.load(path);
+        store.upsert(template("local-old-guess", "local-old-guess", "A".repeat(64)));
+        store.upsert(template("cloud-art", "cloud-v1", "B".repeat(64)));
+        store.save();
+        var loaded = AutoFrameTemplateStore.load(path);
+        assertEquals(1, loaded.templates().size());
+        assertTrue(loaded.find("local-old-guess", "local-old-guess").isEmpty());
+        assertTrue(Files.readString(path).contains("local-old-guess"));
+    }
+
+    @Test
+    void rerunReplacesPartialGuessesWithoutChangingCloudOrAnotherWorld() throws Exception {
+        var store = AutoFrameTemplateStore.load(tempDirectory.resolve("groups.json"));
+        var art = MapArtGroupSolverTest.mosaic(2, 2, 8);
+        var partial = MapArtGroupSolver.solve(art.subList(0, 2)).getFirst();
+        var full = MapArtGroupSolver.solve(art).getFirst();
+        var old = AutoFrameInference.template(partial, "world-one");
+        var otherWorld = AutoFrameInference.template(partial, "world-two");
+        var cloud = template("cloud", "v1", "A".repeat(64));
+        store.upsert(old); store.upsert(otherWorld); store.upsert(cloud); store.setActive(old);
+        var replacement = AutoFrameInference.template(full, "world-one");
+        store.replaceInferred("world-one", Set.copyOf(full.tileMapIds()), List.of(replacement));
+        store.save();
+        var loaded = AutoFrameTemplateStore.load(tempDirectory.resolve("groups.json"));
+        assertEquals(Set.of(otherWorld, cloud, replacement), Set.copyOf(loaded.templates()));
+        assertTrue(loaded.activeTemplate().isEmpty());
+        assertEquals(Set.of(cloud, replacement), Set.copyOf(loaded.templates("world-one")));
+        loaded.replaceInferred("world-one", Set.copyOf(partial.tileMapIds()), List.of(old));
+        assertEquals(Set.of(otherWorld, cloud, replacement), Set.copyOf(loaded.templates()));
     }
 }

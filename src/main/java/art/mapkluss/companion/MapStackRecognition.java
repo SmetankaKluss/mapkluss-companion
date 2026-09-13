@@ -3,11 +3,9 @@ package art.mapkluss.companion;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 
 final class MapStackRecognition {
     private MapStackRecognition() {
@@ -29,6 +27,8 @@ final class MapStackRecognition {
             AutoFrameTemplate template = templateByKey.get(value.groupKey());
             if (observation == null || template == null || value.tileIndex() < 0
                 || value.tileIndex() >= template.tileHashes().size()) continue;
+            int exactIndex = template.tileIndexForMapId(value.mapId());
+            if (exactIndex >= 0 && exactIndex != value.tileIndex()) continue;
             String expected = template.tileHashes().get(value.tileIndex());
             if (value.tileHash() != null && !value.tileHash().equals(expected)) continue;
             if (observation.hash() != null && !observation.hash().equals(expected)) continue;
@@ -47,40 +47,15 @@ final class MapStackRecognition {
             if (candidates.size() == 1) put(result, observation, candidates.getFirst());
         }
 
-        boolean changed;
-        do {
-            changed = false;
-            Set<String> presentGroups = new LinkedHashSet<>();
-            for (Match match : result.values()) presentGroups.add(match.groupKey());
-            for (Observation observation : unique.values()) {
-                if (result.containsKey(observation.mapId()) || observation.hash() == null) continue;
-                List<Candidate> candidates = candidatesByHash(observation.hash(), templates).stream()
-                    .filter(candidate -> presentGroups.contains(key(candidate.template())))
-                    .toList();
-                Set<String> candidateGroups = new LinkedHashSet<>();
-                for (Candidate candidate : candidates) candidateGroups.add(key(candidate.template()));
-                if (candidateGroups.size() != 1) continue;
-                String selectedGroup = candidateGroups.iterator().next();
-                List<Candidate> oneGroup = candidates.stream()
-                    .filter(candidate -> key(candidate.template()).equals(selectedGroup))
-                    .toList();
-                Candidate selected = exactOrSingle(observation, oneGroup);
-                if (selected != null) {
-                    put(result, observation, selected);
-                    changed = true;
-                }
-            }
-        } while (changed);
-
         return Map.copyOf(result);
     }
 
-    private static Candidate exactOrSingle(Observation observation, List<Candidate> candidates) {
-        List<Candidate> exact = candidates.stream().filter(candidate ->
-            candidate.template().tileIndexForMapId(observation.mapId()) == candidate.tileIndex()
-        ).toList();
-        if (exact.size() == 1) return exact.getFirst();
-        return candidates.size() == 1 ? candidates.getFirst() : null;
+    static boolean matchesCell(Observation observation, AutoFrameTemplate template, int tileIndex,
+                               List<AutoFrameTemplate> templates, List<Known> known) {
+        // Placement requires live pixels as well as identity; a cached binding alone is not enough.
+        if (observation.hash() == null) return false;
+        Match match = resolve(List.of(observation), templates, known).get(observation.mapId());
+        return match != null && match.groupKey().equals(key(template)) && match.tileIndex() == tileIndex;
     }
 
     private static List<Candidate> candidatesByMapId(Observation observation, List<AutoFrameTemplate> templates) {

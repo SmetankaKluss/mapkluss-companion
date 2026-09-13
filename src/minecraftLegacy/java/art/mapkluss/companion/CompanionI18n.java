@@ -72,6 +72,8 @@ final class CompanionI18n {
         put("В открытых слотах нет заполненных карт", "There are no filled maps in the open slots");
         put("Не все карты загрузились. Повторите распознавание", "Some maps did not load. Try identification again");
         put("Распознано карт: ", "Maps identified: ");
+        put("Размер рамок не совпадает с распознанным артом", "The frame grid does not match the identified art");
+        put("Не удалось определить номер этой карты. Выберите арт в библиотеке", "This map's tile number is ambiguous. Select its art in the library");
         put("Сайт", "Site");
         put("Редактор", "Editor");
         put("Страница", "Art page");

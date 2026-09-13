@@ -229,16 +229,14 @@ public final class MapStackManager {
             return;
         }
 
-        List<MapArtLayoutSolver.Tile> unknown = tiles.stream()
-            .filter(tile -> !decorations.containsKey(tile.mapId()))
-            .toList();
-        if (unknown.isEmpty()) {
-            AutoFrameManager.instance().showStatus("Распознано карт: " + decorations.size());
-            return;
-        }
-        if (AutoFrameManager.instance().inferAndRememberVisibleMaps(client, unknown).isPresent()) {
+        if (AutoFrameManager.instance().inferAndRememberVisibleMaps(client, tiles)) {
             scan(client, currentHandler);
-            AutoFrameManager.instance().showStatus("Распознано карт: " + decorations.size());
+            long groups = decorations.values().stream().map(Decoration::groupKey).distinct().count();
+            AutoFrameManager.instance().showStatus(CompanionI18n.english(client)
+                ? "Groups: " + groups + "; maps: " + decorations.size() + "/" + tiles.size()
+                    + (decorations.size() < tiles.size() ? ". Some maps are ambiguous or incomplete" : "")
+                : "Групп: " + groups + "; карт: " + decorations.size() + "/" + tiles.size()
+                    + (decorations.size() < tiles.size() ? ". Есть неоднозначные или неполные карты" : ""));
         }
         dirty = true;
     }

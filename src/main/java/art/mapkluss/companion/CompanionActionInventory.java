@@ -117,7 +117,7 @@ final class CompanionActionInventory {
             "tracker.group.copy", "tracker.group.refresh", "tracker.group.leave", "tracker.group.confirm", "tracker.group.cancel",
             "tracker.group.place", "tracker.group.unplace",
             "tracker.group.source_upload", "tracker.group.source_download",
-            "tracker.group.adopt",
+            "tracker.group.adopt", "tracker.group.previous", "tracker.group.next",
             "tracker.add_one", "tracker.clear_count", "tracker.complete_all",
             "tracker.status_gathering", "tracker.status_building",
             "global.back", "global.language"

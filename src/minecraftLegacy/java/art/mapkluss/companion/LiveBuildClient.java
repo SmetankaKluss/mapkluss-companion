@@ -97,9 +97,46 @@ public final class LiveBuildClient {
     }
     private final Map<Integer,LiveBuildGroupController.Adoption> groupAdoptions=new HashMap<>();
     private LiveBuildGroupController.Adoption pendingGroupAdoption;
+    public enum GroupPlacementStatus { NONE, SHARING, SHARED, ACCEPTING, PLACED, ANCHOR_ONLY, FAILED, STALE, LITEMATICA, DIMENSION }
+    private GroupPlacementStatus groupPlacementStatus=GroupPlacementStatus.NONE;
+    private LiveBuildGroupController.Publication pendingPublication;
+    private LiveBuildGroupController.Transport publicationTransport;
+    private boolean publicationSent;
+    private GroupPlacementIntent groupIntent;
+    private boolean groupIntentAnchored,groupGhostPending;
+    private long groupIntentDeadline;
+    private int sharedTile=-1;
+    private record GroupPlacementIntent(String buildId,LiveBuildGroupController.Source source,
+        LiveBuildSharedPlacement placement,Object world,long generation) { }
+    public GroupPlacementStatus groupPlacementStatus(){return groupPlacementStatus;}
+    public boolean groupPlacementBusy(){return groupIntent!=null||pendingPublication!=null;}
+    public LiveBuildSharedPlacement sharedPlacement(){
+        var choices=groups.placements();
+        if(choices.isEmpty())return null;
+        var selected=groups.placement(sharedTile<0?selectedPart():sharedTile);
+        return selected!=null?selected:choices.getFirst();
+    }
+    public void cycleSharedPlacement(int delta){
+        var choices=groups.placements();if(choices.isEmpty()||groupPlacementBusy())return;
+        sharedTile=choices.get(Math.floorMod(choices.indexOf(sharedPlacement())+delta,choices.size())).tile();
+    }
+    public void acceptGroupPlacement(MinecraftClient client,LiveBuildSharedPlacement remote){
+        if(!canAdoptGroupPlacement()||remote==null||!groups.placements().contains(remote)||client.player==null)return;
+        if(!remote.dimension().equals(LensWorldIdentity.dimensionId(client))){groupPlacementStatus=GroupPlacementStatus.DIMENSION;return;}
+        if(!OptionalLitematicaAdapter.available()){groupPlacementStatus=GroupPlacementStatus.LITEMATICA;return;}
+        var group=groups.group();
+        var expectedWorld=client.world;
+        Runnable begin=()->{
+            groupIntent=new GroupPlacementIntent(group.id(),group.source(),remote,expectedWorld,sourceGeneration);
+            groupIntentAnchored=false;groupGhostPending=false;groupIntentDeadline=now()+120000;
+            groupPlacementStatus=GroupPlacementStatus.ACCEPTING;
+        };
+        if(groups.matches())begin.run();
+        else transferSource(client,false,begin,remote);
+    }
     public boolean canAdoptGroupPlacement() {
-        return groups.available()&&groups.matches()&&!groups.busy()&&!preparing()&&(!selectedPlaced()||canChangeGroupPhase())&&!phaseBound()
-            &&groups.placement(selectedPart())!=null;
+        return groups.available()&&groups.group()!=null&&!groups.busy()&&!preparing()&&!sourceBusy()&&!groupPlacementBusy()
+            &&!phaseBound()&&sharedPlacement()!=null;
     }
     private boolean canChangeGroupPhase(){
         var previous=groupAdoptions.get(selectedPart());var current=groups.transport();
@@ -108,18 +145,24 @@ public final class LiveBuildClient {
             &&bundleRuntime.canChangeGroupPhase(groups.placement(selectedPart()));
     }
     public void adoptGroupPlacement(MinecraftClient client,LiveBuildSharedPlacement remote) {
-        if(client.world!=world||client.player==null||!canAdoptGroupPlacement()||remote==null||remote.tile()!=selectedPart())return;
+        if(client.world!=world||client.player==null||!groups.matches()||groups.busy()||preparing()||phaseBound()||remote==null||remote.tile()!=selectedPart())return;
         var ticket=groups.adopt(remote,LensWorldIdentity.dimensionId(client),true);
         if(ticket==null)return;
         try {
             if(bundleRuntime!=null){
-                if(selectedPlaced())bundleRuntime.changeGroupPhase(remote,()->groups.valid(ticket));
-                else bundleRuntime.adoptGroupPlacement(remote,()->groups.valid(ticket));
+                if(bundleRuntime.matchesGroupPlacement(remote)){groupAdoptions.put(remote.tile(),ticket);return;}
+                if(selectedPlaced()&&canChangeGroupPhase())bundleRuntime.changeGroupPhase(remote,()->groups.valid(ticket));
+                else if(selectedPlaced())bundleRuntime.replaceGroupPlacement(remote,()->groups.valid(ticket));
+                else {
+                    bundleRuntime.adoptGroupPlacement(remote,()->groups.valid(ticket));
+                }
             }
             else {
                 var part=selectedMap();
                 if(part==null||!remote.targetSha256().equals(part.targetSha256())||remote.phase()!=-1||remote.cellCount()!=part.cells().size())
                     throw new IllegalArgumentException("Different local target");
+                var placed=progress.placement(remote.tile());
+                if(placed!=null&&remote.matchesLocal(placed.identity(),-1,placed.size())){groupAdoptions.put(remote.tile(),ticket);return;}
                 anchor(client,new BlockPos(remote.origin().x(),remote.origin().y(),remote.origin().z()),remote.transform());
                 pendingGroupAdoption=ticket;
             }
@@ -161,7 +204,15 @@ public final class LiveBuildClient {
     }
     public void publishGroupPlacement(LiveBuildGroupController.Publication confirmed) {
         // A phase/selection/anchor change while the confirmation is open invalidates that consent.
-        if(confirmed!=null&&confirmed.equals(groupPublication()))groups.publish(confirmed,true);
+        if(confirmed==null||!confirmed.equals(groupPublication())||!canTransferSource(true))return;
+        var transport=groups.sourceTransport();
+        transferSource(MinecraftClient.getInstance(),true,()->{
+            if(!confirmed.equals(groupPublication())||!groups.sourceCurrent(transport)){groupPlacementStatus=GroupPlacementStatus.STALE;return;}
+            pendingPublication=confirmed;publicationTransport=transport;publicationSent=false;
+            groupPlacementStatus=GroupPlacementStatus.SHARING;
+            groups.refresh();
+        },null);
+        groupPlacementStatus=GroupPlacementStatus.SHARING;
     }
     public LiveBuildGroupController.Source groupSource() {
         var bounds = artworkBounds();
@@ -191,29 +242,35 @@ public final class LiveBuildClient {
     public boolean sourceComplete(){return sourceComplete;}
     public boolean canTransferSource(boolean upload){
         var t=groups.sourceTransport();
-        return t!=null&&!sourceBusy()&&!groups.busy()&&!preparing()&&(!upload||
+        return t!=null&&!sourceBusy()&&!groupPlacementBusy()&&!groups.busy()&&!preparing()&&(!upload||
             t.group().role().equals("owner")&&groups.matches()&&persistence!=null&&persistence.source()!=null);
     }
     public void transferSource(MinecraftClient client,boolean upload){
+        transferSource(client,upload,null,null);
+    }
+    private void transferSource(MinecraftClient client,boolean upload,Runnable completed,LiveBuildSharedPlacement placement){
         if(client.player==null||!canTransferSource(upload))return;
         var t=groups.sourceTransport();var expectedWorld=client.world;
         var cache=LiveBuildSourceCache.forRunDir(client.runDirectory.toPath());
         var ref=persistence==null?null:persistence.source();
-        sourcePercent=0;sourceFailed=false;sourceComplete=false;
+        sourcePercent=0;sourceFailed=false;sourceComplete=false;groupPlacementStatus=GroupPlacementStatus.NONE;
         long generation=++sourceGeneration;sourcePending=true;
         sourceTask=sourceWorker.submit(()->{
             try{
                 LiveBuildSourceCache.Loaded loaded;
                 if(upload){
                     LiveBuildSourceTransfer.upload(t,cache,ref,()->groups.sourceCurrent(t),value->sourcePercent=value);loaded=null;
-                }else loaded=LiveBuildSourceTransfer.download(t,cache,()->groups.sourceCurrent(t),value->sourcePercent=value);
+                }else loaded=LiveBuildSourceTransfer.download(t,cache,()->groups.sourceCurrent(t)
+                    &&(placement==null||placement.equals(groups.placement(placement.tile()))),value->sourcePercent=value);
                 client.execute(()->{
                     if(generation!=sourceGeneration){if(loaded!=null)loaded.close();return;}
                     sourcePending=false;
                     if(client.world!=expectedWorld||client.player==null||!groups.sourceCurrent(t)){if(loaded!=null)loaded.close();return;}
+                    if(placement!=null&&!placement.equals(groups.placement(placement.tile()))){if(loaded!=null)loaded.close();groupPlacementStatus=GroupPlacementStatus.STALE;return;}
                     try{
                         if(loaded!=null)openCached(client,loaded,client.player.getBlockPos(),null);
                         sourceComplete=true;
+                        if(completed!=null)completed.run();
                     }catch(RuntimeException failed){if(loaded!=null)loaded.close();sourceFailed=true;}
                 });
             }catch(Exception failure){
@@ -222,10 +279,72 @@ public final class LiveBuildClient {
                     sourcePending=false;
                     if(client.world!=expectedWorld||!groups.sourceCurrent(t))return;
                     sourceFailed=true;
+                    groupPlacementStatus=GroupPlacementStatus.FAILED;
                     if(failure instanceof LiveBuildApiClient.ApiException apiFailure&&(apiFailure.status()==401||apiFailure.status()==403))groups.clear();
                 });
             }
         });
+    }
+    private void finishGroupIntent(GroupPlacementStatus status){
+        groupIntent=null;groupGhostPending=false;groupIntentAnchored=false;groupPlacementStatus=status;
+    }
+    private boolean currentGroupIntent(GroupPlacementIntent intent,MinecraftClient client){
+        var group=groups.group();
+        return groupIntent==intent&&intent.generation()==sourceGeneration&&client.world==intent.world()&&client.player!=null
+            &&group!=null&&groups.matches()&&group.id().equals(intent.buildId())&&group.source().equals(intent.source())
+            &&intent.placement().equals(groups.placement(intent.placement().tile()));
+    }
+    private void tickGroupPlacement(MinecraftClient client){
+        if(pendingPublication!=null){
+            if(!groups.sourceCurrent(publicationTransport)||!pendingPublication.equals(groupPublication())){
+                pendingPublication=null;groupPlacementStatus=GroupPlacementStatus.STALE;
+            }else if(!groups.busy()){
+                if(!publicationSent&&groups.canPublish()){groups.publish(pendingPublication,true);publicationSent=true;}
+                else if(publicationSent||!groups.canPublish()){
+                    var ticket=groups.publishedPlacement(pendingPublication.tile());
+                    groupPlacementStatus=ticket!=null&&ticket.placement().matchesLocal(pendingPublication.identity(),pendingPublication.phase(),pendingPublication.cellCount())
+                        ?GroupPlacementStatus.SHARED:GroupPlacementStatus.FAILED;
+                    pendingPublication=null;
+                }
+            }
+        }
+        var intent=groupIntent;if(intent==null)return;
+        if(client.world!=intent.world()||client.player==null||intent.generation()!=sourceGeneration||now()>groupIntentDeadline){finishGroupIntent(GroupPlacementStatus.STALE);return;}
+        // Downloading a different source resets the tracker; wait for its authenticated group resume.
+        if(groups.group()==null&&(resumeGroup!=null||groups.busy()))return;
+        if(!currentGroupIntent(intent,client)){finishGroupIntent(GroupPlacementStatus.STALE);return;}
+        if(groups.busy()||preparing()||groupGhostPending)return;
+        var remote=intent.placement();
+        if(selectedPart()!=remote.tile()){
+            if(groupIntentAnchored){finishGroupIntent(GroupPlacementStatus.STALE);return;}
+            selectPart(remote.tile()-selectedPart());return;
+        }
+        if(phaseBound()){finishGroupIntent(GroupPlacementStatus.FAILED);return;}
+        if(!groupIntentAnchored){
+            adoptGroupPlacement(client,remote);groupIntentAnchored=true;return;
+        }
+        var ticket=activeGroupPlacement(remote.tile());
+        if(ticket==null||!ticket.placement().equals(remote)){finishGroupIntent(GroupPlacementStatus.FAILED);return;}
+        try{
+            var part=selectedMap();var palette=new HashMap<LiveBuildProgress.State,LiveBuildProgress.State>();
+            for(var cell:part.cells())if(!cell.requiresAir())palette.computeIfAbsent(cell.expected(),state->transformState(state,remote.transform()));
+            var runDir=client.runDirectory.toPath();
+            int dataVersion=GroupPlacementVersion.current();
+            var placementId=LiveBuildGroupSchematic.placementId(sourceWorld+":"+sourceDimension,intent.buildId(),remote.tile());
+            groupGhostPending=true;
+            sourceTask=sourceWorker.submit(()->{
+                try{
+                    var file=LiveBuildGroupSchematic.install(runDir,part,remote,palette,dataVersion);
+                    client.execute(()->{
+                        if(groupIntent!=intent)return;
+                        if(!currentGroupIntent(intent,client)||!groups.valid(ticket)||selectedPart()!=remote.tile()||activeGroupPlacement(remote.tile())==null){finishGroupIntent(GroupPlacementStatus.STALE);return;}
+                        var p=remote.origin();
+                        var result=OptionalLitematicaAdapter.createGroupPlacement(file.path(),new BlockPos(p.x(),p.y(),p.z()),placementId,remote.tile());
+                        finishGroupIntent(result.placed()?GroupPlacementStatus.PLACED:GroupPlacementStatus.ANCHOR_ONLY);
+                    });
+                }catch(Exception failure){client.execute(()->{if(groupIntent==intent)finishGroupIntent(GroupPlacementStatus.ANCHOR_ONLY);});}
+            });
+        }catch(RuntimeException failure){finishGroupIntent(GroupPlacementStatus.ANCHOR_ONLY);}
     }
     public LiveBuildOrbitPreview.Surface orbitSurface(){
         if(bundleRuntime!=null)return bundleRuntime.orbitSurface();
@@ -447,6 +566,8 @@ public final class LiveBuildClient {
         reset();
     }
     private void reset() {
+        groupIntent=null;pendingPublication=null;publicationTransport=null;groupGhostPending=false;sharedTile=-1;
+        groupPlacementStatus=GroupPlacementStatus.NONE;
         webPublisher.clear(); webSnapshot=null; webArt=webVersion=null; webConfigureAt=0;
         materialSnapshot=null;scannedMaterials=null;nextMaterials=0;
         sourceGeneration++;sourcePending=false;
@@ -587,7 +708,7 @@ public final class LiveBuildClient {
         updateGroupAdoptions();
         ensurePersistence(client);
         if(world!=null&&(client.world!=world||client.player==null)){persist(true);reset();return;}
-        if(world==null&&client.world!=null&&client.player!=null){
+        if(world==null&&client.world!=null&&client.player!=null&&!sourceBusy()){
             var saved=persistence.poll(LensWorldIdentity.serverHash(client),LensWorldIdentity.dimensionId(client));
             if(saved!=null){
                 try{openCached(client,saved.source(),client.player.getBlockPos().toImmutable(),saved.snapshot());}
@@ -597,6 +718,7 @@ public final class LiveBuildClient {
         }
         publishGroupEvidence();
         resumeGroup(client);
+        tickGroupPlacement(client);
         if(persistence.due(now())&&!preparing())persist(false);
         if(bundleRuntime!=null){
             if(client.world!=world||client.world==null||client.player==null){stop();return;}

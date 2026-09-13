@@ -7,6 +7,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class MapStackRecognitionTest {
     private static final String A = "A".repeat(64);
@@ -71,5 +72,53 @@ final class MapStackRecognitionTest {
 
     private static AutoFrameTemplate template(String id, List<String> hashes, List<Integer> ids) {
         return new AutoFrameTemplate(id, id + "-v1", id, hashes.size(), 1, hashes, ids, "2026-07-19T00:00:00Z");
+    }
+
+    @Test
+    void aPresentArtDoesNotStealAnAmbiguousTileFromAnIncompleteArt() {
+        AutoFrameTemplate first = template("first", List.of(A, B), List.of());
+        AutoFrameTemplate second = template("second", List.of(A, C), List.of());
+        var result = MapStackRecognition.resolve(List.of(
+            new MapStackRecognition.Observation(20, A), new MapStackRecognition.Observation(21, B)
+        ), List.of(first, second), List.of());
+        assertFalse(result.containsKey(20));
+        assertEquals("first|first-v1", result.get(21).groupKey());
+    }
+
+    @Test
+    void frameMatchingUsesTheExactTileNotJustItsRepeatedImage() {
+        AutoFrameTemplate art = template("art", List.of(A, A, B), List.of(10, 11, 12));
+        assertFalse(MapStackRecognition.matchesCell(new MapStackRecognition.Observation(10, A),
+            art, 1, List.of(art), List.of()));
+        assertTrue(MapStackRecognition.matchesCell(new MapStackRecognition.Observation(11, A),
+            art, 1, List.of(art), List.of()));
+        assertFalse(MapStackRecognition.matchesCell(new MapStackRecognition.Observation(99, A),
+            art, 1, List.of(art), List.of()));
+        var binding = new MapStackRecognition.Known(99, "art|art-v1", 1, A);
+        assertTrue(MapStackRecognition.matchesCell(new MapStackRecognition.Observation(99, A),
+            art, 1, List.of(art), List.of(binding)));
+        assertFalse(MapStackRecognition.matchesCell(new MapStackRecognition.Observation(99, null),
+            art, 1, List.of(art), List.of(binding)));
+        assertFalse(MapStackRecognition.matchesCell(new MapStackRecognition.Observation(99, C),
+            art, 1, List.of(art), List.of(binding)));
+    }
+
+    @Test
+    void frameMatchingDoesNotUseAnotherArtsIdenticalTile() {
+        AutoFrameTemplate first = template("first", List.of(A, B), List.of(10, 11));
+        AutoFrameTemplate second = template("second", List.of(A, C), List.of(20, 21));
+        assertFalse(MapStackRecognition.matchesCell(new MapStackRecognition.Observation(20, A),
+            first, 0, List.of(first, second), List.of()));
+    }
+
+    @Test
+    void aStaleBindingCannotOverrideTheExactNumberOfARepeatedTile() {
+        AutoFrameTemplate art = template("art", List.of(A, A, B), List.of(10, 11, 12));
+        var observation = new MapStackRecognition.Observation(11, A);
+        var stale = new MapStackRecognition.Known(11, "art|art-v1", 0, A);
+        var result = MapStackRecognition.resolve(List.of(observation), List.of(art), List.of(stale));
+        assertEquals(2, result.get(11).tileNumber());
+        assertFalse(MapStackRecognition.matchesCell(observation, art, 0, List.of(art), List.of(stale)));
+        assertTrue(MapStackRecognition.matchesCell(observation, art, 1, List.of(art), List.of(stale)));
     }
 }
